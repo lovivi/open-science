@@ -83,7 +83,10 @@ pub fn base_workspace_dir(app: &AppHandle) -> Result<PathBuf, String> {
     // One-time migrations, oldest name last. A failed rename (e.g. cross-volume)
     // keeps the existing location rather than splitting the user's files.
     if !dir.exists() {
-        for old in [docs.join("Open Science"), runtime_root(app)?.join("workspace")] {
+        for old in [
+            docs.join("Open Science"),
+            runtime_root(app)?.join("workspace"),
+        ] {
             if old.is_dir() {
                 if std::fs::rename(&old, &dir).is_ok() {
                     break;
@@ -135,11 +138,17 @@ fn user_auth_source() -> Option<PathBuf> {
 /// (from the Settings page) — never silently. Returns false when there is no
 /// CLI login to import. Restarts the sidecar so it picks the credentials up.
 #[tauri::command]
-pub fn import_opencode_login(app: AppHandle, state: State<'_, RuntimeState>) -> Result<bool, String> {
+pub fn import_opencode_login(
+    app: AppHandle,
+    state: State<'_, RuntimeState>,
+) -> Result<bool, String> {
     let Some(src) = user_auth_source() else {
         return Ok(false);
     };
-    let dst = runtime_root(&app)?.join("xdg-data").join("opencode").join("auth.json");
+    let dst = runtime_root(&app)?
+        .join("xdg-data")
+        .join("opencode")
+        .join("auth.json");
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -294,6 +303,21 @@ pub(crate) fn free_port() -> u16 {
 }
 
 fn spawn_sidecar(app: &AppHandle, port: u16) -> Result<CommandChild, String> {
+    // Backend dispatch — SSH / WSL / Native
+    #[cfg(windows)]
+    {
+        let cfg = load_backend_config(app);
+        if cfg.kind == "ssh" {
+            if let Some(ref host) = cfg.host {
+                return spawn_ssh(app, port, host);
+            }
+        } else if cfg.kind == "wsl" {
+            if let Some(ref distro) = cfg.distro {
+                return spawn_wsl(app, port, distro);
+            }
+        }
+    }
+
     let root = runtime_root(app)?;
     let cfg = root.join("xdg-config");
     let data = root.join("xdg-data");
@@ -349,7 +373,9 @@ fn spawn_sidecar(app: &AppHandle, port: u16) -> Result<CommandChild, String> {
     #[cfg(unix)]
     let cmd = cmd.env("PATH", enriched_path());
 
-    let (mut rx, child) = cmd.spawn().map_err(|e| format!("failed to spawn opencode: {e}"))?;
+    let (mut rx, child) = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn opencode: {e}"))?;
     // Drain events so the child's stdout/stderr buffer never blocks it.
     tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
     Ok(child)
@@ -370,6 +396,328 @@ fn restart_sidecar(app: &AppHandle, state: &RuntimeState) -> Result<String, Stri
     let url = format!("http://127.0.0.1:{port}");
     *state.url.lock().unwrap() = Some(url.clone());
     Ok(url)
+}
+
+// ── WSL sidecar ─────────────────────────────────────────────────────────────
+
+/// Path to the backend config file under the runtime root.
+fn backend_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(runtime_root(app)?.join("backend.json"))
+}
+
+/// Persist the backend selection to disk.
+pub fn persist_backend_config(
+    app: &AppHandle,
+    config: &crate::wsl::BackendConfig,
+) -> Result<(), String> {
+    let path = backend_config_path(app)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Save the backend selection from the frontend (Tauri command).
+#[tauri::command]
+pub fn save_backend_config(
+    app: AppHandle,
+    kind: String,
+    distro: Option<String>,
+    host: Option<String>,
+) -> Result<(), String> {
+    if !matches!(kind.as_str(), "native" | "wsl" | "ssh") {
+        return Err(format!("invalid backend kind: {kind}"));
+    }
+    if kind == "ssh" {
+        if let Some(ref h) = host {
+            if !crate::hpc::is_safe_host(h) {
+                return Err("invalid SSH host format".into());
+            }
+        } else {
+            return Err("SSH backend requires a host".into());
+        }
+    }
+    let config = crate::wsl::BackendConfig { kind, distro, host };
+    persist_backend_config(&app, &config)
+}
+
+/// Load the current backend config from the frontend (Tauri command).
+#[tauri::command]
+pub fn get_backend_config(app: AppHandle) -> Result<crate::wsl::BackendConfig, String> {
+    Ok(load_backend_config(&app))
+}
+
+/// Load the persisted backend selection (defaults to native).
+pub fn load_backend_config(app: &AppHandle) -> crate::wsl::BackendConfig {
+    let path = match backend_config_path(app) {
+        Ok(p) => p,
+        Err(_) => {
+            return crate::wsl::BackendConfig {
+                kind: "native".into(),
+                distro: None,
+                host: None,
+            }
+        }
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => {
+            return crate::wsl::BackendConfig {
+                kind: "native".into(),
+                distro: None,
+                host: None,
+            }
+        }
+    };
+    serde_json::from_str(&text).unwrap_or(crate::wsl::BackendConfig {
+        kind: "native".into(),
+        distro: None,
+        host: None,
+    })
+}
+
+/// Return the SSH host when the backend is configured for SSH mode, or `None`.
+///
+/// On non-Windows this always returns `None` because SSH remote execution is
+/// only supported under Windows in this release.
+pub fn get_remote_host_if_ssh(app: &AppHandle) -> Option<String> {
+    #[cfg(windows)]
+    {
+        let config = load_backend_config(app);
+        if config.kind == "ssh" {
+            return config.host.clone();
+        }
+    }
+    let _ = app;
+    None
+}
+
+/// Fetch the remote user's home directory (the workspace root on the remote
+/// side).  Only meaningful when the backend is in SSH mode.
+#[cfg(windows)]
+pub fn remote_workspace_path(host: &str) -> Result<String, String> {
+    crate::remote::ssh_exec(host, "echo $HOME").map(|s| s.trim().to_string())
+}
+
+/// Resolve the filesystem path of a bundled Tauri sidecar binary.
+#[cfg(windows)]
+fn resolve_sidecar_path(app: &AppHandle, binary: &str) -> Result<PathBuf, String> {
+    // Verify the sidecar is declared in tauri.conf.
+    let _ = app
+        .shell()
+        .sidecar(binary)
+        .map_err(|e| format!("sidecar '{binary}' not configured: {e}"))?;
+
+    let exe_name = format!("{binary}.exe");
+    // Tauri 2 sidecar naming: <binary>-<target-triple>[.ext]
+    let target_name = format!("{binary}-x86_64-pc-windows-msvc");
+
+    // 1. Same directory as the running executable (dev & packaged)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(dir) = exe_path.parent() {
+            for name in [format!("{target_name}.exe"), exe_name.clone()] {
+                let p = dir.join(&name);
+                if p.exists() {
+                    return Ok(p);
+                }
+            }
+        }
+    }
+    // 2. Tauri resource directory (production bundle)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        for name in [format!("{target_name}.exe"), exe_name.clone()] {
+            let p = resource_dir.join(&name);
+            if p.exists() {
+                return Ok(p);
+            }
+        }
+    }
+    // 3. CARGO_MANIFEST_DIR/binaries/ (dev: built sidecar is staged here)
+    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+        let p = PathBuf::from(manifest)
+            .join("binaries")
+            .join(format!("{target_name}.exe"));
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+
+    Err(format!("cannot locate sidecar binary for '{binary}'"))
+}
+
+/// Ensure the bundled `opencode` binary is present inside the WSL distro at
+/// `~/.local/bin/opencode`. Returns the WSL-side absolute path.
+///
+/// On each call, compares the Windows sidecar's modified time with the WSL
+/// copy's mtime so app updates are synced into WSL automatically.
+#[cfg(windows)]
+fn ensure_opencode_in_wsl(app: &AppHandle, distro: &str) -> Result<String, String> {
+    use crate::wsl::{copy_to_wsl, wsl_exec};
+
+    let home = wsl_exec(distro, "sh", &["-c", "echo $HOME"]).unwrap_or_else(|_| "/root".into());
+    let bin_dir = format!("{}/.local/bin", home.trim());
+    let bin_path = format!("{}/opencode", bin_dir);
+
+    // Compare mtime of the Windows sidecar vs the WSL copy to detect app updates.
+    let src = resolve_sidecar_path(app, "opencode")?;
+    let force = src
+        .metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()))
+        .unwrap_or(0);
+
+    // Query WSL copy's mtime via `stat`
+    let wsl_mtime = wsl_exec(distro, "stat", &["-c", "%Y", &bin_path])
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+
+    if wsl_exec(distro, "test", &["-x", &bin_path]).is_ok() && wsl_mtime >= force {
+        return Ok(bin_path);
+    }
+
+    // Copy from the bundled sidecar
+    wsl_exec(distro, "mkdir", &["-p", &bin_dir])?;
+    copy_to_wsl(distro, &src, &Path::new(&bin_path))?;
+
+    Ok(bin_path)
+}
+
+/// Spawn the bundled OpenCode inside a WSL distro instead of natively.
+///
+/// The binary runs inside WSL, binds to `0.0.0.0` (so the Windows frontend can
+/// reach it), and stores its config in the WSL Linux filesystem for performance.
+#[cfg(windows)]
+fn spawn_wsl(app: &AppHandle, port: u16, distro: &str) -> Result<CommandChild, String> {
+    use crate::wsl::{windows_to_wsl_path, wsl_available, wsl_exec};
+
+    if !wsl_available() {
+        return Err("WSL is not available on this system".into());
+    }
+
+    // Create runtime directories on Windows (for config persistence)
+    let root = runtime_root(app)?;
+    let workspace = workspace_dir(app)?;
+    deploy_bundled_skills(app);
+
+    // Ensure the opencode binary is copied into WSL
+    let wsl_bin = ensure_opencode_in_wsl(app, distro)?;
+
+    // Resolve WSL-side paths
+    let home = wsl_exec(distro, "sh", &["-c", "echo $HOME"]).unwrap_or_else(|_| "/root".into());
+    let home = home.trim();
+    let wsl_config = format!("{home}/.config");
+    let wsl_data = format!("{home}/.local/share");
+    let wsl_cache = format!("{home}/.cache");
+    let wsl_state = format!("{home}/.local/state");
+    let wsl_workspace = windows_to_wsl_path(&workspace.to_string_lossy());
+
+    let port_str = port.to_string();
+
+    // Build the wsl.exe command
+    // Use --cd to set the working directory inside WSL
+    let args: Vec<String> = vec![
+        "--cd".into(),
+        wsl_workspace,
+        "--distribution".into(),
+        distro.to_string(),
+        "--".into(),
+        wsl_bin,
+        "serve".into(),
+        "--hostname".into(),
+        "0.0.0.0".into(),
+        "--port".into(),
+        port_str,
+        "--cors".into(),
+        "*".into(),
+    ];
+
+    let cmd = app
+        .shell()
+        .command("wsl.exe")
+        .args(&args)
+        .env("XDG_CONFIG_HOME", &wsl_config)
+        .env("XDG_DATA_HOME", &wsl_data)
+        .env("XDG_CACHE_HOME", &wsl_cache)
+        .env("XDG_STATE_HOME", &wsl_state)
+        .env("HOME", home);
+
+    let (mut rx, child) = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn WSL opencode: {e}"))?;
+    tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    Ok(child)
+}
+
+/// Spawn the bundled OpenCode on a remote host over SSH.
+///
+/// 1. Verifies the host is reachable (SSH connectivity check).
+/// 2. Validates that `opencode` is available on the remote PATH.
+/// 3. Spawns a single SSH process that BOTH starts opencode serve on the remote
+///    AND creates a local TCP tunnel (`-L`) so the Windows frontend can reach
+///    the remote opencode via `127.0.0.1:<port>`.
+///
+/// When the returned child is killed (via `stop_runtime`), the SSH connection
+/// drops and the remote opencode process is automatically cleaned up — no
+/// separate tunnel management needed.
+#[cfg(windows)]
+fn spawn_ssh(app: &AppHandle, port: u16, host: &str) -> Result<CommandChild, String> {
+    if !crate::hpc::is_safe_host(host) {
+        return Err("invalid host".into());
+    }
+
+    // 1. Check reachability
+    match crate::remote::check_reachable(host) {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(format!("host '{host}' is not reachable over SSH"));
+        }
+        Err(e) => {
+            return Err(format!("SSH connection to '{host}' failed: {e}"));
+        }
+    }
+
+    // 2. OpenCode must be installed on the remote
+    if crate::remote::ssh_exec(host, "which opencode 2>/dev/null").is_err() {
+        return Err(format!(
+            "opencode not found on '{host}' — install opencode on the remote server"
+        ));
+    }
+
+    // 3. Start opencode serve on the remote with a local port-forwarding tunnel
+    let port_str = port.to_string();
+    let cmd = app
+        .shell()
+        .command("ssh")
+        .args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ConnectTimeout=8",
+            "-L",
+            &format!("127.0.0.1:{port}:127.0.0.1:{port}"),
+            "--",
+            host,
+            "opencode",
+            "serve",
+            "--hostname",
+            "127.0.0.1",
+            "--port",
+            &port_str,
+            "--cors",
+            "*",
+        ]);
+
+    let (mut rx, child) = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn SSH opencode: {e}"))?;
+    tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    Ok(child)
 }
 
 /// Start the bundled OpenCode (idempotent). Returns its base URL.
@@ -488,13 +836,28 @@ pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
 #[tauri::command]
 pub fn stop_runtime(state: State<'_, RuntimeState>) {
     if let Some(child) = state.child.lock().unwrap().take() {
+        kill_process_tree(&child);
         let _ = child.kill();
     }
     *state.url.lock().unwrap() = None;
 }
 
+/// Attempt to kill a process and its entire process tree (crucial for WSL: when
+/// wsl.exe is killed without its tree the Linux-side opencode stays alive).
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn kill_process_tree(child: &CommandChild) {
+    #[cfg(windows)]
+    {
+        let pid = child.pid();
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+    }
+}
+
 pub fn kill_child(state: &RuntimeState) {
     if let Some(child) = state.child.lock().unwrap().take() {
+        kill_process_tree(&child);
         let _ = child.kill();
     }
 }
@@ -580,15 +943,30 @@ mod tests {
 
         sync_skill_pack(&src, &dst).unwrap();
 
-        assert_eq!(fs::read_to_string(dst.join("paper-writer/SKILL.md")).unwrap(), "v2");
+        assert_eq!(
+            fs::read_to_string(dst.join("paper-writer/SKILL.md")).unwrap(),
+            "v2"
+        );
         assert_eq!(
             fs::read_to_string(dst.join("paper-writer/references/guide.md")).unwrap(),
             "ref"
         );
-        assert!(!dst.join("paper-writer/obsolete.md").exists(), "stale file must be gone");
-        assert_eq!(fs::read_to_string(dst.join("my-skill/SKILL.md")).unwrap(), "user");
-        assert!(!dst.join(".commit").exists(), "top-level files are not skills");
-        assert!(!dst.join("placeholder").exists(), "dirs without SKILL.md are not skills");
+        assert!(
+            !dst.join("paper-writer/obsolete.md").exists(),
+            "stale file must be gone"
+        );
+        assert_eq!(
+            fs::read_to_string(dst.join("my-skill/SKILL.md")).unwrap(),
+            "user"
+        );
+        assert!(
+            !dst.join(".commit").exists(),
+            "top-level files are not skills"
+        );
+        assert!(
+            !dst.join("placeholder").exists(),
+            "dirs without SKILL.md are not skills"
+        );
 
         fs::remove_dir_all(&tmp).unwrap();
     }
@@ -652,7 +1030,9 @@ fn remove_key_from_config(text: &str, section: &str, key: &str) -> Result<String
         .map(|p| p.remove(key).is_some())
         .unwrap_or(false);
     if !removed {
-        return Err(format!("\"{key}\" is not in the config's {section} section"));
+        return Err(format!(
+            "\"{key}\" is not in the config's {section} section"
+        ));
     }
     serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())
 }

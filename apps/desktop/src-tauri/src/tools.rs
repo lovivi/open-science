@@ -31,15 +31,27 @@ fn probe_with_path(name: &str, bin: &str, version_arg: &str, path: Option<&str>)
     let out = cmd.output();
     match out {
         Ok(o) if o.status.success() || !o.stdout.is_empty() || !o.stderr.is_empty() => {
-            let text = if !o.stdout.is_empty() { o.stdout } else { o.stderr };
+            let text = if !o.stdout.is_empty() {
+                o.stdout
+            } else {
+                o.stderr
+            };
             let version = String::from_utf8_lossy(&text)
                 .lines()
                 .next()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
-            ToolStatus { name: name.to_string(), found: true, version }
+            ToolStatus {
+                name: name.to_string(),
+                found: true,
+                version,
+            }
         }
-        _ => ToolStatus { name: name.to_string(), found: false, version: None },
+        _ => ToolStatus {
+            name: name.to_string(),
+            found: false,
+            version: None,
+        },
     }
 }
 
@@ -76,7 +88,11 @@ mod tests {
 pub fn detect_tools() -> Vec<ToolStatus> {
     let python = {
         let p3 = probe("Python", "python3", "--version");
-        if p3.found { p3 } else { probe("Python", "python", "--version") }
+        if p3.found {
+            p3
+        } else {
+            probe("Python", "python", "--version")
+        }
     };
     vec![
         python,

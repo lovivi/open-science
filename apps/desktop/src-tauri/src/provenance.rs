@@ -129,7 +129,10 @@ fn python_version() -> Option<String> {
     CACHE
         .get_or_init(|| {
             let bin = crate::kernel::python_bin()?;
-            let out = std::process::Command::new(bin).arg("--version").output().ok()?;
+            let out = std::process::Command::new(bin)
+                .arg("--version")
+                .output()
+                .ok()?;
             let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
             let text = if text.is_empty() {
                 String::from_utf8_lossy(&out.stderr).trim().to_string() // Python 2 printed -V to stderr
@@ -167,9 +170,7 @@ fn normalize_rel(root: &Path, path: &str) -> Result<String, String> {
     } else {
         p.to_path_buf()
     };
-    if rel.as_os_str().is_empty()
-        || rel.components().any(|c| !matches!(c, Component::Normal(_)))
-    {
+    if rel.as_os_str().is_empty() || rel.components().any(|c| !matches!(c, Component::Normal(_))) {
         return Err("path must stay inside the workspace".into());
     }
     Ok(rel
@@ -279,7 +280,16 @@ pub fn record_provenance(
     let _guard = state.0.lock().map_err(|_| "provenance lock poisoned")?;
     let root = workspace_dir(&app)?;
     let env = capture_env(&root, app.package_info().version.to_string());
-    append_record(&root, &path, &tool, session_id, model, content, log, Some(env))
+    append_record(
+        &root,
+        &path,
+        &tool,
+        session_id,
+        model,
+        content,
+        log,
+        Some(env),
+    )
 }
 
 #[tauri::command]
@@ -315,8 +325,28 @@ mod tests {
     #[test]
     fn versions_increment_per_path_and_round_trip() {
         let root = temp_root("versions");
-        let r1 = append_record(&root, "fig/plot.py", "write", Some("ses_1".into()), Some("m".into()), Some("print(1)".into()), None, None).unwrap();
-        let r2 = append_record(&root, "fig/plot.py", "edit", Some("ses_1".into()), None, Some("print(2)".into()), None, None).unwrap();
+        let r1 = append_record(
+            &root,
+            "fig/plot.py",
+            "write",
+            Some("ses_1".into()),
+            Some("m".into()),
+            Some("print(1)".into()),
+            None,
+            None,
+        )
+        .unwrap();
+        let r2 = append_record(
+            &root,
+            "fig/plot.py",
+            "edit",
+            Some("ses_1".into()),
+            None,
+            Some("print(2)".into()),
+            None,
+            None,
+        )
+        .unwrap();
         let other = append_record(
             &root,
             "report.md",
@@ -329,7 +359,10 @@ mod tests {
                 python: Some("3.12.4".into()),
                 platform: "macos-aarch64".into(),
                 app: "0.1.0".into(),
-                packages: Some(super::PackageSnapshot { count: 2, hash: "abc123".into() }),
+                packages: Some(super::PackageSnapshot {
+                    count: 2,
+                    hash: "abc123".into(),
+                }),
             }),
         )
         .unwrap();
@@ -363,7 +396,9 @@ mod tests {
         // Blank lines are not counted as packages.
         assert_eq!(s1.count, 3);
         assert_eq!(s1.hash, content_hash(freeze)); // deterministic addressing
-        let lock = root.join(".openscience/env").join(format!("{}.txt", s1.hash));
+        let lock = root
+            .join(".openscience/env")
+            .join(format!("{}.txt", s1.hash));
         assert_eq!(std::fs::read_to_string(&lock).unwrap(), freeze);
 
         // Same environment -> same hash, no duplicate file rewrite.
@@ -382,7 +417,17 @@ mod tests {
         let root = temp_root("norm");
         // Absolute path under the workspace → same key as the relative form.
         let abs = root.join("a/b.txt");
-        append_record(&root, abs.to_str().unwrap(), "write", None, None, None, None, None).unwrap();
+        append_record(
+            &root,
+            abs.to_str().unwrap(),
+            "write",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let v = versions_for(&root, "a/b.txt").unwrap();
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].path, "a/b.txt");
@@ -401,7 +446,10 @@ mod tests {
         // A corrupt line must not lose the rest of the history.
         use std::io::Write;
         let file = root.join(".openscience/provenance.jsonl");
-        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&file)
+            .unwrap();
         writeln!(f, "not json").unwrap();
         append_record(&root, "x.py", "write", None, None, None, None, None).unwrap();
         let v = versions_for(&root, "x.py").unwrap();

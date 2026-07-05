@@ -147,7 +147,14 @@ mod tests {
 
     #[test]
     fn writes_provider_key_model_into_empty_config() {
-        let out = merge_config("", "anthropic", "sk-test", "anthropic/claude-sonnet-4-5", None).unwrap();
+        let out = merge_config(
+            "",
+            "anthropic",
+            "sk-test",
+            "anthropic/claude-sonnet-4-5",
+            None,
+        )
+        .unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["model"], "anthropic/claude-sonnet-4-5");
         assert_eq!(v["provider"]["anthropic"]["options"]["apiKey"], "sk-test");
@@ -167,7 +174,10 @@ mod tests {
     fn sets_base_url_when_provided() {
         let out = merge_config("", "openai", "k", "openai/gpt-4o", Some("https://x/v1")).unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["provider"]["openai"]["options"]["baseURL"], "https://x/v1");
+        assert_eq!(
+            v["provider"]["openai"]["options"]["baseURL"],
+            "https://x/v1"
+        );
     }
 
     #[test]

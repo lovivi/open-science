@@ -37,6 +37,7 @@ import { setupScienceMcp } from "@/lib/tauri";
 import { ClusterCard } from "@/components/settings/ClusterCard";
 import { ModalCard } from "@/components/settings/ModalCard";
 import { DataFlowCard } from "@/components/settings/DataFlowCard";
+import { WslBackendCard } from "@/components/settings/WslBackendCard";
 import { SCIENCE_CONNECTORS, connectorConfig } from "@/lib/scienceConnectors";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/cn";
@@ -824,6 +825,9 @@ export function SettingsPage() {
         <ClusterCard />
 
         <ModalCard />
+
+        {/* ---- Execution Backend (WSL / native) ---- */}
+        <WslBackendCard />
 
         {/* ---- Privacy & data flow ---- */}
         <DataFlowCard model={defaultModel} workspace={wsPath} />

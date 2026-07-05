@@ -33,18 +33,16 @@ pub struct HpcJob {
 
 /// `user@host` or `host` made only of safe characters. Rejects anything that
 /// could smuggle an ssh option (leading `-`) or shell metacharacters.
-fn is_safe_host(host: &str) -> bool {
-    let rest = host.split_once('@').map(|(u, h)| {
-        (!u.is_empty() && u.chars().all(is_host_char)).then_some(h)
-    });
+pub(crate) fn is_safe_host(host: &str) -> bool {
+    let rest = host
+        .split_once('@')
+        .map(|(u, h)| (!u.is_empty() && u.chars().all(is_host_char)).then_some(h));
     let host_part = match rest {
         Some(Some(h)) => h,
         Some(None) => return false,
         None => host,
     };
-    !host_part.is_empty()
-        && !host_part.starts_with('-')
-        && host_part.chars().all(is_host_char)
+    !host_part.is_empty() && !host_part.starts_with('-') && host_part.chars().all(is_host_char)
 }
 
 fn is_host_char(c: char) -> bool {
@@ -93,7 +91,12 @@ fn parse_ssh_hosts(text: &str) -> Vec<String> {
 /// the UI also accepts a free-form `user@host`).
 #[tauri::command]
 pub fn list_ssh_hosts(app: AppHandle) -> Result<Vec<String>, String> {
-    let path = app.path().home_dir().map_err(|e| e.to_string())?.join(".ssh").join("config");
+    let path = app
+        .path()
+        .home_dir()
+        .map_err(|e| e.to_string())?
+        .join(".ssh")
+        .join("config");
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(parse_ssh_hosts(&text)),
         Err(_) => Ok(Vec::new()), // no ssh config is a normal state
@@ -108,7 +111,9 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn hpc_config(app: AppHandle) -> Result<Option<String>, String> {
     let path = config_path(&app)?;
-    let Ok(text) = std::fs::read_to_string(path) else { return Ok(None) };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Ok(None);
+    };
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     Ok(v.get("host").and_then(|h| h.as_str()).map(str::to_string))
 }
@@ -137,7 +142,11 @@ pub fn set_hpc_config(app: AppHandle, host: Option<String>) -> Result<(), String
 
 /// Run one non-interactive command on the host via the system ssh, with the
 /// user's own keys/config. Returns (exit code, stdout, stderr).
-async fn run_ssh(app: &AppHandle, host: &str, command: &str) -> Result<(i32, String, String), String> {
+async fn run_ssh(
+    app: &AppHandle,
+    host: &str,
+    command: &str,
+) -> Result<(i32, String, String), String> {
     if !is_safe_host(host) {
         return Err("invalid host".into());
     }
@@ -145,13 +154,18 @@ async fn run_ssh(app: &AppHandle, host: &str, command: &str) -> Result<(i32, Str
         .shell()
         .command("ssh")
         .args([
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=8",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=8",
             // Never trust an unknown host key on the app's behalf (safety
             // default: remote connections need the user's approval) — the
             // user verifies the fingerprint once in their own terminal.
-            "-o", "StrictHostKeyChecking=yes",
-            "--", host, command,
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "--",
+            host,
+            command,
         ])
         .output()
         .await
@@ -169,18 +183,31 @@ pub async fn hpc_check(app: AppHandle, host: String) -> Result<HpcCheck, String>
     let (code, stdout, stderr) = run_ssh(&app, &host, "sbatch --version").await?;
     if code == 0 {
         let version = stdout.lines().next().unwrap_or("slurm").trim().to_string();
-        return Ok(HpcCheck { reachable: true, slurm: Some(version), message: None });
+        return Ok(HpcCheck {
+            reachable: true,
+            slurm: Some(version),
+            message: None,
+        });
     }
     // ssh itself reports failures (auth, DNS, timeout) with exit 255.
     if code == 255 {
-        let mut detail = stderr.lines().last().unwrap_or("connection failed").trim().to_string();
+        let mut detail = stderr
+            .lines()
+            .last()
+            .unwrap_or("connection failed")
+            .trim()
+            .to_string();
         if stderr.contains("Host key verification failed") {
             detail = format!(
                 "host key not verified — run `ssh {host}` once in your terminal to check \
                  and accept its fingerprint, then retry"
             );
         }
-        return Ok(HpcCheck { reachable: false, slurm: None, message: Some(detail) });
+        return Ok(HpcCheck {
+            reachable: false,
+            slurm: None,
+            message: Some(detail),
+        });
     }
     Ok(HpcCheck {
         reachable: true,
@@ -234,7 +261,12 @@ pub async fn hpc_cancel(app: AppHandle, host: String, job_id: String) -> Result<
     // Single-quoted for the remote shell: array ids contain glob chars ([ ]).
     let (code, _, stderr) = run_ssh(&app, &host, &format!("scancel '{job_id}'")).await?;
     if code != 0 {
-        return Err(stderr.lines().last().unwrap_or("scancel failed").trim().to_string());
+        return Err(stderr
+            .lines()
+            .last()
+            .unwrap_or("scancel failed")
+            .trim()
+            .to_string());
     }
     Ok(())
 }
@@ -259,7 +291,14 @@ Host gpu+login \"quoted alias\"
         // Aliases the connect path would reject (is_safe_host) are not suggested.
         assert_eq!(
             parse_ssh_hosts(cfg),
-            vec!["login", "cluster-a", "cluster-b", "lowercase", "good.host", "gpu+login"]
+            vec![
+                "login",
+                "cluster-a",
+                "cluster-b",
+                "lowercase",
+                "good.host",
+                "gpu+login"
+            ]
         );
     }
 
@@ -298,7 +337,8 @@ Host gpu+login \"quoted alias\"
 
     #[test]
     fn parses_squeue_lines_name_last() {
-        let jobs = parse_squeue("42|RUNNING|1:23|gpu|fit model|stage 2\n43|PENDING|0:00|cpu|sim\n\n");
+        let jobs =
+            parse_squeue("42|RUNNING|1:23|gpu|fit model|stage 2\n43|PENDING|0:00|cpu|sim\n\n");
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].id, "42");
         assert_eq!(jobs[0].state, "RUNNING");

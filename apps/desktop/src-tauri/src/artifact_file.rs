@@ -73,9 +73,18 @@ pub fn mime_for(ext: &str) -> (&'static str, bool) {
         // Binary phase diagram — JSON text, rendered by the native viewer.
         "phase" => ("application/json", true),
         "txt" => ("text/plain", true),
-        "docx" => ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", false),
-        "xlsx" => ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", false),
-        "pptx" => ("application/vnd.openxmlformats-officedocument.presentationml.presentation", false),
+        "docx" => (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            false,
+        ),
+        "xlsx" => (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            false,
+        ),
+        "pptx" => (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            false,
+        ),
         _ => ("application/octet-stream", false),
     }
 }
@@ -128,7 +137,9 @@ pub fn locate_under(root: &Path, rel: &str) -> Option<String> {
     let mut stack = vec![(root.clone(), 0usize)];
     let mut seen = 0usize;
     while let Some((dir, depth)) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             seen += 1;
             if seen > SEARCH_MAX_ENTRIES {
@@ -138,7 +149,10 @@ pub fn locate_under(root: &Path, rel: &str) -> Option<String> {
             let fname = entry.file_name();
             // Hidden files/dirs and dependency trees are never agent artifacts.
             let fname_str = fname.to_string_lossy();
-            if fname_str.starts_with('.') || fname_str == "node_modules" || fname_str == "__pycache__" {
+            if fname_str.starts_with('.')
+                || fname_str == "node_modules"
+                || fname_str == "__pycache__"
+            {
                 continue;
             }
             let Ok(ft) = entry.file_type() else { continue };
@@ -170,12 +184,25 @@ pub fn locate_under(root: &Path, rel: &str) -> Option<String> {
 /// path (searching by basename when the literal path does not exist), or None.
 #[tauri::command]
 pub fn resolve_artifact(app: AppHandle, path: String) -> Result<Option<String>, String> {
+    // SSH mode: resolve on remote host
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        let remote_ws = crate::runtime::remote_workspace_path(&host).unwrap_or_default();
+        return Ok(resolve_artifact_ssh(&host, &remote_ws, &path));
+    }
+
     Ok(locate_under(&workspace_dir(&app)?, &path))
 }
 
 /// Read a workspace file for preview. Text types come back as UTF-8, binary as base64.
 #[tauri::command]
 pub fn read_artifact(app: AppHandle, path: String, root: Option<String>) -> Result<ArtifactFile, String> {
+    // SSH mode: read via remote SSH
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        return read_artifact_ssh(&app, &host, &path);
+    }
+
     let full = resolve_under(&scope_root(&app, root.as_deref())?, &path)?;
     let ext = full
         .extension()
@@ -230,6 +257,15 @@ pub fn os_open(full: &Path) -> Result<(), String> {
 /// Open a workspace file in the OS default application.
 #[tauri::command]
 pub fn open_path(app: AppHandle, path: String, root: Option<String>) -> Result<(), String> {
+    // SSH mode: files are on the remote, not locally openable
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        return Err(format!(
+            "cannot open remote file '{}' on host '{}' locally",
+            path, host
+        ));
+    }
+
     let full = resolve_under(&scope_root(&app, root.as_deref())?, &path)?;
     os_open(&full)
 }
@@ -245,13 +281,22 @@ pub struct NotebookEntry {
 /// search), newest first. `root: "base"` spans every session folder.
 #[tauri::command]
 pub fn list_notebooks(app: AppHandle, root: Option<String>) -> Result<Vec<NotebookEntry>, String> {
+    // SSH mode: use find on the remote host
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        let remote_ws = crate::runtime::remote_workspace_path(&host).unwrap_or_default();
+        return list_notebooks_ssh(&host, &remote_ws);
+    }
+
     let root = scope_root(&app, root.as_deref())?;
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let mut found = Vec::new();
     let mut stack = vec![(root.clone(), 0usize)];
     let mut seen = 0usize;
     while let Some((dir, depth)) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             seen += 1;
             if seen > SEARCH_MAX_ENTRIES {
@@ -260,7 +305,10 @@ pub fn list_notebooks(app: AppHandle, root: Option<String>) -> Result<Vec<Notebo
             }
             let fname = entry.file_name();
             let fname_str = fname.to_string_lossy();
-            if fname_str.starts_with('.') || fname_str == "node_modules" || fname_str == "__pycache__" {
+            if fname_str.starts_with('.')
+                || fname_str == "node_modules"
+                || fname_str == "__pycache__"
+            {
                 continue;
             }
             let Ok(ft) = entry.file_type() else { continue };
@@ -281,7 +329,10 @@ pub fn list_notebooks(app: AppHandle, root: Option<String>) -> Result<Vec<Notebo
                         .components()
                         .map(|c| c.as_os_str().to_string_lossy().into_owned())
                         .collect();
-                    found.push(NotebookEntry { path: parts.join("/"), modified });
+                    found.push(NotebookEntry {
+                        path: parts.join("/"),
+                        modified,
+                    });
                 }
             }
         }
@@ -309,6 +360,13 @@ pub struct DirEntry {
 /// entries and heavy build dirs are skipped; directories sort first, then by name.
 #[tauri::command]
 pub fn list_dir(app: AppHandle, rel: String, root: Option<String>) -> Result<Vec<DirEntry>, String> {
+    // SSH mode: list remote directory over SSH
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        let remote_ws = crate::runtime::remote_workspace_path(&host).unwrap_or_default();
+        return list_dir_ssh(&host, &remote_ws, &rel);
+    }
+
     dir_entries(&scope_root(&app, root.as_deref())?, &rel)
 }
 
@@ -319,7 +377,10 @@ fn dir_entries(root: &Path, rel: &str) -> Result<Vec<DirEntry>, String> {
         return Err("not a directory".into());
     }
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+    for entry in std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
         let fname = entry.file_name();
         let name = fname.to_string_lossy().into_owned();
         if name.starts_with('.') || name == "node_modules" || name == "__pycache__" {
@@ -345,7 +406,11 @@ fn dir_entries(root: &Path, rel: &str) -> Result<Vec<DirEntry>, String> {
             path: rel_path,
             name,
             is_dir: ft.is_dir(),
-            size: if ft.is_file() { meta.as_ref().map(|m| m.len()).unwrap_or(0) } else { 0 },
+            size: if ft.is_file() {
+                meta.as_ref().map(|m| m.len()).unwrap_or(0)
+            } else {
+                0
+            },
             modified,
         });
     }
@@ -366,6 +431,12 @@ pub fn write_workspace_file(
     content: String,
     root: Option<String>,
 ) -> Result<(), String> {
+    // SSH mode: write to remote filesystem
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        return write_workspace_file_ssh(&app, &host, &path, &content);
+    }
+
     let rel = Path::new(&path);
     if rel.is_absolute()
         || rel
@@ -386,6 +457,12 @@ pub fn write_workspace_file(
 /// (deduplicated as name-1.ext, name-2.ext on collision); empty on cancel.
 #[tauri::command]
 pub async fn add_files_to_workspace(app: AppHandle) -> Result<Vec<String>, String> {
+    // SSH mode: scp files to remote workspace
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        return add_files_to_workspace_ssh(&app, &host);
+    }
+
     use tauri_plugin_dialog::DialogExt;
     let Some(picked) = app.dialog().file().blocking_pick_files() else {
         return Ok(Vec::new()); // user cancelled
@@ -415,6 +492,12 @@ pub fn add_text_to_workspace(
     filename: String,
     content: String,
 ) -> Result<String, String> {
+    // SSH mode: write via SSH to remote workspace
+    #[cfg(windows)]
+    if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        return add_text_to_workspace_ssh(&app, &host, &filename, &content);
+    }
+
     let base = Path::new(&filename)
         .file_name()
         .ok_or("invalid file name")?
@@ -469,7 +552,12 @@ pub async fn save_text_file(
     content: String,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let Some(choice) = app.dialog().file().set_file_name(&filename).blocking_save_file() else {
+    let Some(choice) = app
+        .dialog()
+        .file()
+        .set_file_name(&filename)
+        .blocking_save_file()
+    else {
         return Ok(None); // user cancelled
     };
     let path = choice.into_path().map_err(|e| e.to_string())?;
@@ -482,14 +570,269 @@ fn base64_encode(input: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
         out.push(T[((n >> 18) & 63) as usize] as char);
         out.push(T[((n >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
+}
+
+// ── SSH remote helpers ─────────────────────────────────────────────────────────
+// Every function below is gated by #[cfg(windows)] so it compiles away to nothing
+// on non-Windows platforms (where SSH remote backend is not supported).
+
+/// SSH variant of [`read_artifact`]: reads a remote file through SSH.
+#[cfg(windows)]
+fn read_artifact_ssh(app: &AppHandle, host: &str, path: &str) -> Result<ArtifactFile, String> {
+    let remote_ws = crate::runtime::remote_workspace_path(host)?;
+    let remote_path = format!("{}/{}", remote_ws, path.trim_start_matches('/'));
+
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let (mime, is_text) = mime_for(&ext);
+    let bytes = crate::remote::ssh_read_file_binary(host, &remote_path)?;
+    let size = bytes.len() as u64;
+    if size > 25 * 1024 * 1024 {
+        return Err("file too large to preview (>25 MB)".into());
+    }
+    let (encoding, data) = if is_text {
+        ("utf8", String::from_utf8_lossy(&bytes).into_owned())
+    } else {
+        ("base64", base64_encode(&bytes))
+    };
+    Ok(ArtifactFile {
+        path: path.to_string(),
+        mime: mime.to_string(),
+        encoding,
+        data,
+        size,
+    })
+}
+
+/// SSH variant of [`resolve_artifact`]: locate a file on the remote host via SSH.
+#[cfg(windows)]
+fn resolve_artifact_ssh(host: &str, remote_ws: &str, path: &str) -> Option<String> {
+    // 1. Literal path
+    let full_remote = format!("{}/{}", remote_ws, path.trim_start_matches('/'));
+    if crate::remote::ssh_path_exists(host, &full_remote) {
+        return Some(path.to_string());
+    }
+    // 2. Basename search
+    let name = std::path::Path::new(path).file_name()?;
+    let name = name.to_str()?;
+    let escaped_ws = remote_ws.replace('\'', "'\\''");
+    let cmd = format!(
+        "find '{}' -maxdepth 8 -name '{}' -type f ! -path '*/.*' \
+         ! -path '*/node_modules/*' ! -path '*/__pycache__/*' 2>/dev/null \
+         | head -1",
+        escaped_ws,
+        name.replace('\'', "'\\''")
+    );
+    let out = crate::remote::ssh_exec(host, &cmd).ok()?;
+    let result = out.trim();
+    if result.is_empty() {
+        return None;
+    }
+    let rel = result
+        .strip_prefix(remote_ws.trim())
+        .unwrap_or(&result)
+        .trim_start_matches('/')
+        .to_string();
+    if rel.is_empty() { None } else { Some(rel) }
+}
+
+/// SSH variant of [`list_dir`]: list a remote directory over SSH.
+#[cfg(windows)]
+fn list_dir_ssh(host: &str, remote_ws: &str, rel: &str) -> Result<Vec<DirEntry>, String> {
+    let dir_path = if rel.is_empty() || rel == "." {
+        remote_ws.to_string()
+    } else {
+        let normalised = rel.trim_start_matches('/');
+        format!("{}/{}", remote_ws, normalised)
+    };
+    let escaped = dir_path.replace('\'', "'\\''");
+    // Single SSH invocation to stat every entry, skipping hidden / ignored dirs.
+    let stat_cmd = format!(
+        "cd '{}' && for f in *; do \
+         [ -e \"$f\" ] || continue; \
+         case \"$f\" in .*|node_modules|__pycache__) continue;; esac; \
+         if [ -d \"$f\" ]; then echo \"D|$f||0\"; \
+         else s=$(stat -c'%s' \"$f\" 2>/dev/null || echo 0); \
+         m=$(stat -c'%Y' \"$f\" 2>/dev/null || echo 0); \
+         echo \"F|$f|$s|$m\"; fi; done",
+        escaped
+    );
+    let out = crate::remote::ssh_exec(host, &stat_cmd)?;
+    let mut entries: Vec<DirEntry> = Vec::new();
+    for line in out.lines() {
+        let parts: Vec<&str> = line.splitn(4, '|').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let is_dir = parts[0] == "D";
+        let name = parts[1].to_string();
+        let size: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let modified: u64 = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let rel_path = if rel.is_empty() {
+            name.clone()
+        } else {
+            format!("{}/{}", rel, name)
+        };
+        entries.push(DirEntry {
+            path: rel_path,
+            name,
+            is_dir,
+            size,
+            modified,
+        });
+    }
+    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+    Ok(entries)
+}
+
+/// SSH variant of [`list_notebooks`]: discover .ipynb files on the remote host.
+#[cfg(windows)]
+fn list_notebooks_ssh(host: &str, remote_ws: &str) -> Result<Vec<NotebookEntry>, String> {
+    let escaped = remote_ws.replace('\'', "'\\''");
+    let find_cmd = format!(
+        "find '{}' -maxdepth 8 -name '*.ipynb' -type f \
+         ! -path '*/.*' ! -path '*/node_modules/*' ! -path '*/__pycache__/*' \
+         -printf '%P\\t%Ts\\n' 2>/dev/null | head -10000",
+        escaped
+    );
+    let out = crate::remote::ssh_exec(host, &find_cmd)?;
+    let mut found: Vec<NotebookEntry> = Vec::new();
+    for line in out.lines() {
+        if let Some((rel_path, modified_s)) = line.rsplit_once('\t') {
+            let modified: u64 = modified_s.trim().parse().unwrap_or(0);
+            let rel_path = rel_path.trim().to_string();
+            // Apply same depth limit as the local version
+            if rel_path.split('/').count() <= 8 {
+                found.push(NotebookEntry { path: rel_path, modified });
+            }
+        }
+    }
+    found.sort_by(|a, b| b.modified.cmp(&a.modified));
+    Ok(found)
+}
+
+/// SSH variant of [`write_workspace_file`]: write text to a remote file.
+#[cfg(windows)]
+fn write_workspace_file_ssh(
+    app: &AppHandle,
+    host: &str,
+    path: &str,
+    content: &str,
+) -> Result<(), String> {
+    let rel = std::path::Path::new(path);
+    if rel.is_absolute()
+        || rel
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err("path must be a plain workspace-relative path".into());
+    }
+    let remote_ws = crate::runtime::remote_workspace_path(host)?;
+    let remote_full = format!("{}/{}", remote_ws, path);
+    crate::remote::ssh_write_file(host, &remote_full, content.as_bytes())
+}
+
+/// SSH variant of [`add_files_to_workspace`]: copy local files to the remote host.
+#[cfg(windows)]
+fn add_files_to_workspace_ssh(app: &AppHandle, host: &str) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(picked) = app.dialog().file().blocking_pick_files() else {
+        return Ok(Vec::new());
+    };
+    let remote_ws = crate::runtime::remote_workspace_path(host)?;
+    let mut added = Vec::new();
+    for file in picked {
+        let src = file.into_path().map_err(|e| e.to_string())?;
+        let name = src
+            .file_name()
+            .ok_or("picked path has no file name")?
+            .to_string_lossy()
+            .to_string();
+        // Use scp to copy to the remote workspace
+        let dest = format!("{}:{}/{}", host, remote_ws, name);
+        let output = std::process::Command::new("scp")
+            .args([
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                &src.to_string_lossy(),
+                &dest,
+            ])
+            .output()
+            .map_err(|e| format!("scp failed: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("scp failed: {}", stderr.trim()));
+        }
+        added.push(name);
+    }
+    Ok(added)
+}
+
+/// SSH variant of [`add_text_to_workspace`]: write text to a new remote file.
+#[cfg(windows)]
+fn add_text_to_workspace_ssh(
+    app: &AppHandle,
+    host: &str,
+    filename: &str,
+    content: &str,
+) -> Result<String, String> {
+    let base = std::path::Path::new(filename)
+        .file_name()
+        .ok_or("invalid file name")?
+        .to_string_lossy()
+        .to_string();
+    // Deduplicate against the remote workspace
+    let remote_ws = crate::runtime::remote_workspace_path(host)?;
+    if !crate::remote::ssh_path_exists(host, &format!("{}/{}", remote_ws, base)) {
+        let remote_full = format!("{}/{}", remote_ws, base);
+        crate::remote::ssh_write_file(host, &remote_full, content.as_bytes())?;
+        return Ok(base);
+    }
+    let (stem, ext) = match base.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, Some(e)),
+        _ => (base.as_str(), None),
+    };
+    for n in 1.. {
+        let candidate = match ext {
+            Some(e) => format!("{stem}-{n}.{e}"),
+            None => format!("{stem}-{n}"),
+        };
+        if !crate::remote::ssh_path_exists(host, &format!("{}/{}", remote_ws, candidate)) {
+            let remote_full = format!("{}/{}", remote_ws, candidate);
+            crate::remote::ssh_write_file(host, &remote_full, content.as_bytes())?;
+            return Ok(candidate);
+        }
+    }
+    unreachable!()
 }
 
 #[cfg(test)]
@@ -575,7 +918,8 @@ mod tests {
     fn molecule_files_are_text() {
         // The 3D molecule viewer needs utf8, not base64 (3Dmol parses the source).
         for ext in [
-            "mol", "mol2", "sdf", "smi", "smiles", "cif", "mcif", "mmcif", "pdb", "pqr", "xyz", "cube",
+            "mol", "mol2", "sdf", "smi", "smiles", "cif", "mcif", "mmcif", "pdb", "pqr", "xyz",
+            "cube",
         ] {
             assert!(mime_for(ext).1, "{ext} must be a text type");
         }
@@ -641,13 +985,17 @@ mod tests {
 
     #[test]
     fn locate_prefers_the_newest_of_duplicate_basenames() {
-        let root = std::env::temp_dir().join(format!("ai4s-locate-dup-test-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ai4s-locate-dup-test-{}", std::process::id()));
         std::fs::create_dir_all(root.join("old")).unwrap();
         std::fs::create_dir_all(root.join("new")).unwrap();
         std::fs::write(root.join("old/report.pdf"), b"x").unwrap();
         std::fs::write(root.join("new/report.pdf"), b"y").unwrap();
         let past = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-        let f = std::fs::File::options().write(true).open(root.join("old/report.pdf")).unwrap();
+        let f = std::fs::File::options()
+            .write(true)
+            .open(root.join("old/report.pdf"))
+            .unwrap();
         f.set_modified(past).unwrap();
 
         assert_eq!(

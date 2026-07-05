@@ -28,8 +28,23 @@ fn python_bin(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// The managed interpreter path if the shared env exists, else None. The
 /// frontend derives launch commands (`<python> -m <module> …`) from this.
+///
+/// WSL mode: returns `"python3"` (resolved via PATH inside the WSL distro).
 #[tauri::command]
 pub fn science_mcp_python(app: AppHandle) -> Result<Option<String>, String> {
+    // WSL mode: pip packages are installed into the WSL system Python, so the
+    // command is simply "python3" resolved through the WSL PATH.
+    #[cfg(windows)]
+    {
+        let config = crate::runtime::load_backend_config(&app);
+        if config.kind == "wsl" {
+            if let Some(ref distro) = config.distro {
+                return Ok(
+                    crate::wsl::wsl_check_tool(distro, "python3").then(|| "python3".to_string())
+                );
+            }
+        }
+    }
     let py = python_bin(&app)?;
     Ok(py.exists().then(|| py.to_string_lossy().to_string()))
 }
@@ -47,16 +62,44 @@ pub async fn setup_science_mcp(app: AppHandle, package: String) -> Result<String
     let dir = env_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
+    // WSL mode: pip3 install inside the distro (no uv sidecar needed).
+    // Packages installed into the WSL system Python — jupyter-mcp-server then
+    // runs via `python3 -m <module>` when invoked by the OpenCode sidecar.
+    #[cfg(windows)]
+    {
+        let config = crate::runtime::load_backend_config(&app);
+        if config.kind == "wsl" {
+            if let Some(ref distro) = config.distro {
+                if !crate::wsl::wsl_check_tool(distro, "pip3") {
+                    return Err(
+                        "pip3 is not available in WSL — install python3-pip in your distro".into(),
+                    );
+                }
+                crate::wsl::wsl_exec(distro, "pip3", &["install", &package])?;
+                return Ok("python3".to_string());
+            }
+        }
+    }
+
     let venv = app
         .shell()
         .sidecar("uv")
         .map_err(|e| format!("uv sidecar not found: {e}"))?
-        .args(["venv", &dir.to_string_lossy(), "--python", "3.12", "--allow-existing"])
+        .args([
+            "venv",
+            &dir.to_string_lossy(),
+            "--python",
+            "3.12",
+            "--allow-existing",
+        ])
         .output()
         .await
         .map_err(|e| format!("uv venv failed to run: {e}"))?;
     if !venv.status.success() {
-        return Err(format!("uv venv failed: {}", String::from_utf8_lossy(&venv.stderr)));
+        return Err(format!(
+            "uv venv failed: {}",
+            String::from_utf8_lossy(&venv.stderr)
+        ));
     }
 
     let py = python_bin(&app)?;
@@ -64,7 +107,13 @@ pub async fn setup_science_mcp(app: AppHandle, package: String) -> Result<String
         .shell()
         .sidecar("uv")
         .map_err(|e| format!("uv sidecar not found: {e}"))?
-        .args(["pip", "install", "--python", &py.to_string_lossy(), &package])
+        .args([
+            "pip",
+            "install",
+            "--python",
+            &py.to_string_lossy(),
+            &package,
+        ])
         .output()
         .await
         .map_err(|e| format!("uv pip install failed to run: {e}"))?;
@@ -83,8 +132,12 @@ fn is_safe_package(pkg: &str) -> bool {
     let core = pkg.split_once("==").map(|(n, _)| n).unwrap_or(pkg);
     !core.is_empty()
         && !core.starts_with('-')
-        && core.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-        && pkg.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '='))
+        && core
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && pkg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '='))
 }
 
 #[cfg(test)]

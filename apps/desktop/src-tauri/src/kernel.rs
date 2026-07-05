@@ -9,6 +9,7 @@
 // The read side is therefore identical for both languages.
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
@@ -26,6 +27,9 @@ struct KernelIo {
     seq: u64,
     /// For the R kernel: the file the host writes each cell's code into. None for Python.
     code_file: Option<PathBuf>,
+    /// When set, the `code_file` lives on this SSH host and must be written
+    /// remotely via `ssh_write_file`.  `None` for native / WSL kernels.
+    ssh_host: Option<String>,
 }
 
 /// A running kernel. Two INDEPENDENT locks by design: `io` is held for the
@@ -38,12 +42,12 @@ struct Kernel {
 }
 
 impl Kernel {
-    fn from_child(mut child: Child, code_file: Option<PathBuf>) -> Result<Self, String> {
+    fn from_child(mut child: Child, code_file: Option<PathBuf>, ssh_host: Option<String>) -> Result<Self, String> {
         let stdin = child.stdin.take().ok_or("no kernel stdin")?;
         let stdout = BufReader::new(child.stdout.take().ok_or("no kernel stdout")?);
         Ok(Kernel {
             child: Mutex::new(child),
-            io: Mutex::new(KernelIo { stdin, stdout, seq: 0, code_file }),
+            io: Mutex::new(KernelIo { stdin, stdout, seq: 0, code_file, ssh_host }),
         })
     }
 }
@@ -113,11 +117,17 @@ fn materialize(app: &AppHandle, name: &str, src: &str) -> Result<PathBuf, String
 #[cfg(windows)]
 fn python_candidates() -> Vec<String> {
     // `py` (the launcher) and `python` are what Windows installers register.
-    let mut c = vec!["py".to_string(), "python".to_string(), "python3".to_string()];
+    let mut c = vec![
+        "py".to_string(),
+        "python".to_string(),
+        "python3".to_string(),
+    ];
     if let Ok(profile) = std::env::var("USERPROFILE") {
         c.push(format!("{profile}\\anaconda3\\python.exe"));
         c.push(format!("{profile}\\miniconda3\\python.exe"));
-        c.push(format!("{profile}\\AppData\\Local\\Programs\\Python\\python.exe"));
+        c.push(format!(
+            "{profile}\\AppData\\Local\\Programs\\Python\\python.exe"
+        ));
     }
     c
 }
@@ -146,10 +156,7 @@ fn python_candidates() -> Vec<String> {
 #[cfg(windows)]
 fn rscript_candidates() -> Vec<String> {
     let mut c = vec!["Rscript".to_string(), "Rscript.exe".to_string()];
-    for base in [
-        "C:\\Program Files\\R",
-        "C:\\Program Files (x86)\\R",
-    ] {
+    for base in ["C:\\Program Files\\R", "C:\\Program Files (x86)\\R"] {
         // Newest install layout: <base>\R-x.y.z\bin\Rscript.exe — probed via PATH first,
         // this literal fallback covers the common single-version install.
         c.push(format!("{base}\\bin\\Rscript.exe"));
@@ -197,13 +204,190 @@ pub(crate) fn rscript_bin() -> Option<String> {
     rscript_candidates().into_iter().find(|bin| interpreter_ok(bin))
 }
 
-fn spawn_kernel(app: &AppHandle, lang: &str, cwd: &std::path::Path, key: &str) -> Result<Kernel, String> {
+/// Find Python inside a WSL distro (python3 preferred, python fallback).
+/// Windows only — non-Windows platforms always return None.
+#[cfg(windows)]
+pub(crate) fn wsl_python_bin(distro: &str) -> Option<String> {
+    if crate::wsl::wsl_check_tool(distro, "python3") {
+        Some("python3".into())
+    } else if crate::wsl::wsl_check_tool(distro, "python") {
+        Some("python".into())
+    } else {
+        None
+    }
+}
+
+/// Find Rscript inside a WSL distro.
+/// Windows only — non-Windows platforms always return None.
+#[cfg(windows)]
+pub(crate) fn wsl_rscript_bin(distro: &str) -> Option<String> {
+    if crate::wsl::wsl_check_tool(distro, "Rscript") {
+        Some("Rscript".into())
+    } else {
+        None
+    }
+}
+
+/// Spawn a kernel inside a WSL distro. The bridge script and R code-file paths
+/// are mapped from Windows to WSL paths (`/mnt/...`). Working directory is set
+/// via wsl.exe's `--cd` flag so the kernel's working dir matches the workspace.
+///
+/// Windows only — the WSL dispatch in [`spawn_kernel`] is gated by `#[cfg(windows)]`.
+#[cfg(windows)]
+fn spawn_kernel_wsl(
+    app: &AppHandle,
+    lang: &str,
+    distro: &str,
+    workspace: &Path,
+    key: &str,
+) -> Result<Kernel, String> {
+    let wsl_workspace = crate::wsl::windows_to_wsl_path(&workspace.to_string_lossy());
     let (mut cmd, code_file) = match lang {
         "python" => {
             let script = materialize(app, "kernel_bridge.py", PY_BRIDGE_SRC)?;
-            let python = python_bin().ok_or(
-                "no Python found — install Python 3 to run Python notebooks",
-            )?;
+            let python = wsl_python_bin(distro)
+                .ok_or("no Python found in WSL — install python3 in your WSL distro")?;
+            let script_wsl = crate::wsl::windows_to_wsl_path(&script.to_string_lossy());
+            let mut c = crate::wsl::wsl_command_cwd(distro, &python, &wsl_workspace);
+            c.arg(&script_wsl);
+            (c, None)
+        }
+        "r" => {
+            let script = materialize(app, "kernel_bridge.R", R_BRIDGE_SRC)?;
+            let rscript = wsl_rscript_bin(distro)
+                .ok_or("no R found in WSL — install R (r-project.org) in your WSL distro")?;
+            // One code file per kernel — concurrent R notebooks must not share it.
+            let code_file = kernel_dir(app)?.join(format!("r_cell_{}.R", key_hash(key)));
+            std::fs::write(&code_file, "").map_err(|e| e.to_string())?;
+            let script_wsl = crate::wsl::windows_to_wsl_path(&script.to_string_lossy());
+            let code_file_wsl = crate::wsl::windows_to_wsl_path(&code_file.to_string_lossy());
+            let mut c = crate::wsl::wsl_command_cwd(distro, &rscript, &wsl_workspace);
+            c.arg(&script_wsl).arg(&code_file_wsl);
+            (c, Some(code_file))
+        }
+        _ => return Err(format!("unsupported kernel language: {lang}")),
+    };
+    let child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to start {lang} kernel in WSL: {e}"))?;
+    Kernel::from_child(child, code_file, None)
+}
+
+/// Spawn a kernel on a remote host via SSH.
+///
+/// The bridge script is materialised locally, uploaded to `/tmp/` on the remote,
+/// and then run via `ssh <host> <interpreter> <remote_bridge>` with stdin/stdout
+/// piped through the SSH connection.  The working directory on the remote is set
+/// to the remote home directory (the default SSH directory for commands).
+///
+/// Windows only — the SSH dispatch in [`spawn_kernel`] is `#[cfg(windows)]`.
+#[cfg(windows)]
+fn spawn_kernel_ssh(app: &AppHandle, lang: &str, host: &str) -> Result<Kernel, String> {
+    if !crate::hpc::is_safe_host(host) {
+        return Err("invalid host".into());
+    }
+
+    let remote_ws = crate::runtime::remote_workspace_path(host).unwrap_or_default();
+    let safe_ws = remote_ws.replace('\'', "'\\''");
+
+    // Materialise the bridge script locally so we can upload it
+    let (bridge_name, bridge_src) = match lang {
+        "python" => ("kernel_bridge.py", PY_BRIDGE_SRC),
+        "r" => ("kernel_bridge.R", R_BRIDGE_SRC),
+        _ => return Err(format!("unsupported kernel language: {lang}")),
+    };
+    let local_bridge = materialize(app, bridge_name, bridge_src)?;
+    let bridge_data =
+        std::fs::read(&local_bridge).map_err(|e| format!("failed to read bridge: {e}"))?;
+
+    // Create a remote temp directory and upload the bridge
+    let remote_dir = format!("/tmp/openscience-kernel-{}", std::process::id());
+    crate::remote::ssh_exec(host, &format!("mkdir -p '{}'", remote_dir))?;
+    let remote_bridge = format!("{}/{}", remote_dir, bridge_name);
+    crate::remote::ssh_write_file(host, &remote_bridge, &bridge_data)?;
+
+    let ssh_opts = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new"];
+
+    match lang {
+        "python" => {
+            let python = if crate::remote::ssh_exec(host, "which python3 2>/dev/null").is_ok() {
+                "python3"
+            } else if crate::remote::ssh_exec(host, "which python 2>/dev/null").is_ok() {
+                "python"
+            } else {
+                return Err("no Python found on remote host".into());
+            };
+
+            let child = std::process::Command::new("ssh")
+                .args(ssh_opts)
+                .args([
+                    "--",
+                    host,
+                    "sh",
+                    "-c",
+                    &format!("cd '{}' && {} '{}'", safe_ws, python, remote_bridge),
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("failed to start {} kernel via SSH: {e}", lang))?;
+
+            Kernel::from_child(child, None, None)
+        }
+        "r" => {
+            if crate::remote::ssh_exec(host, "which Rscript 2>/dev/null").is_err() {
+                return Err("no Rscript found on remote host".into());
+            }
+            let code_file = format!("{}/r_cell.R", remote_dir);
+
+            let child = std::process::Command::new("ssh")
+                .args(ssh_opts)
+                .args([
+                    "--",
+                    host,
+                    "sh",
+                    "-c",
+                    &format!(
+                        "cd '{}' && Rscript '{}' '{}'",
+                        safe_ws, remote_bridge, code_file
+                    ),
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("failed to start R kernel via SSH: {e}"))?;
+
+            Kernel::from_child(child, Some(PathBuf::from(&code_file)), Some(host.to_string()))
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn spawn_kernel(app: &AppHandle, lang: &str, cwd: &std::path::Path, key: &str) -> Result<Kernel, String> {
+    // WSL/SSH backend: dispatch to the appropriate spawner
+    #[cfg(windows)]
+    {
+        let config = crate::runtime::load_backend_config(app);
+        if config.kind == "ssh" {
+            if let Some(ref host) = config.host {
+                return spawn_kernel_ssh(app, lang, host);
+            }
+        } else if config.kind == "wsl" {
+            if let Some(ref distro) = config.distro {
+                return spawn_kernel_wsl(app, lang, distro, cwd, key);
+            }
+        }
+    }
+    let (mut cmd, code_file) = match lang {
+        "python" => {
+            let script = materialize(app, "kernel_bridge.py", PY_BRIDGE_SRC)?;
+            let python =
+                python_bin().ok_or("no Python found — install Python 3 to run Python notebooks")?;
             let mut c = Command::new(python);
             c.arg(script);
             (c, None)
@@ -235,7 +419,7 @@ fn spawn_kernel(app: &AppHandle, lang: &str, cwd: &std::path::Path, key: &str) -
     let child = cmd
         .spawn()
         .map_err(|e| format!("failed to start {lang} kernel: {e}"))?;
-    Kernel::from_child(child, code_file)
+    Kernel::from_child(child, code_file, None)
 }
 
 /// Send one request to a running kernel and read its single JSON response line.
@@ -244,7 +428,11 @@ fn exec_on(k: &mut KernelIo, code: &str) -> Result<ExecResult, String> {
     match &k.code_file {
         // R: stage the code in the kernel's file, then poke it with the id.
         Some(path) => {
-            std::fs::write(path, code).map_err(|e| format!("kernel write failed: {e}"))?;
+            if let Some(host) = &k.ssh_host {
+                crate::remote::ssh_write_file(host, &path.to_string_lossy(), code.as_bytes())?;
+            } else {
+                std::fs::write(path, code).map_err(|e| format!("kernel write failed: {e}"))?;
+            }
             writeln!(k.stdin, "{}", k.seq).map_err(|e| format!("kernel write failed: {e}"))?;
         }
         // Python: send the code inline as JSON.
@@ -253,7 +441,9 @@ fn exec_on(k: &mut KernelIo, code: &str) -> Result<ExecResult, String> {
             writeln!(k.stdin, "{req}").map_err(|e| format!("kernel write failed: {e}"))?;
         }
     }
-    k.stdin.flush().map_err(|e| format!("kernel flush failed: {e}"))?;
+    k.stdin
+        .flush()
+        .map_err(|e| format!("kernel flush failed: {e}"))?;
 
     let mut line = String::new();
     let n = k
@@ -267,7 +457,11 @@ fn exec_on(k: &mut KernelIo, code: &str) -> Result<ExecResult, String> {
         serde_json::from_str(line.trim()).map_err(|e| format!("bad kernel response: {e}"))?;
     Ok(ExecResult {
         ok: v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false),
-        stdout: v.get("stdout").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        stdout: v
+            .get("stdout")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         result: v.get("result").and_then(|x| x.as_str()).map(str::to_string),
         error: v.get("error").and_then(|x| x.as_str()).map(str::to_string),
     })
@@ -465,7 +659,7 @@ mod tests {
                     .stderr(Stdio::null())
                     .spawn()
                     .map_err(|e| e.to_string())?;
-                Kernel::from_child(child, None)
+                Kernel::from_child(child, None, None)
             })
         });
 
@@ -506,7 +700,10 @@ mod tests {
             eprintln!("skipping: no python found");
             return;
         };
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../runtime/kernel/kernel_bridge.py");
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../runtime/kernel/kernel_bridge.py"
+        );
         let mut child = Command::new(python)
             .arg(script)
             .stdin(Stdio::piped())
@@ -517,7 +714,12 @@ mod tests {
         let mut stdin = child.stdin.take().unwrap();
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
 
-        writeln!(stdin, "{}", serde_json::json!({"id":"1","code":"a=41\na+1"})).unwrap();
+        writeln!(
+            stdin,
+            "{}",
+            serde_json::json!({"id":"1","code":"a=41\na+1"})
+        )
+        .unwrap();
         stdin.flush().unwrap();
         let r1 = read(&mut stdout);
         assert_eq!(r1["ok"], true);
@@ -547,7 +749,10 @@ mod tests {
             eprintln!("skipping: no Rscript found");
             return;
         };
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../runtime/kernel/kernel_bridge.R");
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../runtime/kernel/kernel_bridge.R"
+        );
         let dir = std::env::temp_dir().join("os_r_kernel_test");
         std::fs::create_dir_all(&dir).unwrap();
         let code_file = dir.join("r_cell.R");

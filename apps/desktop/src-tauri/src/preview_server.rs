@@ -23,7 +23,9 @@ fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         match bytes[i] {
             b'%' => {
-                let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok());
+                let hex = bytes
+                    .get(i + 1..i + 3)
+                    .and_then(|h| std::str::from_utf8(h).ok());
                 if let Some(v) = hex.and_then(|h| u8::from_str_radix(h, 16).ok()) {
                     out.push(v);
                     i += 3;
@@ -99,7 +101,13 @@ fn handle<F: Fn(&str) -> Option<PathBuf>>(mut stream: TcpStream, token: &str, ro
     let raw_path = parts.next().unwrap_or("/");
     let head_only = method == "HEAD";
     if method != "GET" && method != "HEAD" {
-        write_response(&mut stream, "405 Method Not Allowed", "text/plain", b"method not allowed", false);
+        write_response(
+            &mut stream,
+            "405 Method Not Allowed",
+            "text/plain",
+            b"method not allowed",
+            false,
+        );
         return;
     }
     let decoded = percent_decode(raw_path.split('?').next().unwrap_or("/").trim_start_matches('/'));
@@ -133,7 +141,13 @@ fn handle<F: Fn(&str) -> Option<PathBuf>>(mut stream: TcpStream, token: &str, ro
     let full = match resolve_under(&root, &rel) {
         Ok(p) if p.is_file() => p,
         _ => {
-            write_response(&mut stream, "404 Not Found", "text/plain", b"not found", head_only);
+            write_response(
+                &mut stream,
+                "404 Not Found",
+                "text/plain",
+                b"not found",
+                head_only,
+            );
             return;
         }
     };
@@ -141,7 +155,13 @@ fn handle<F: Fn(&str) -> Option<PathBuf>>(mut stream: TcpStream, token: &str, ro
     let (mime, _) = mime_for(ext);
     match std::fs::read(&full) {
         Ok(body) => write_response(&mut stream, "200 OK", mime, &body, head_only),
-        Err(_) => write_response(&mut stream, "500 Internal Server Error", "text/plain", b"read failed", head_only),
+        Err(_) => write_response(
+            &mut stream,
+            "500 Internal Server Error",
+            "text/plain",
+            b"read failed",
+            head_only,
+        ),
     }
 }
 

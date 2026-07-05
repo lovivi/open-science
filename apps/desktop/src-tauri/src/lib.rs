@@ -11,9 +11,11 @@ mod modal;
 mod opencode_config;
 mod preview_server;
 mod provenance;
+mod remote;
 mod runtime;
 mod science_mcp;
 mod tools;
+mod wsl;
 
 use jupyter::JupyterState;
 use kernel::KernelState;
@@ -57,9 +59,12 @@ pub fn run() {
             jupyter::jupyter_status,
             jupyter::setup_jupyter,
             jupyter::start_jupyter,
+            jupyter::stop_jupyter,
             runtime::configure_opencode,
             runtime::get_approval_mode,
             runtime::set_approval_mode,
+            runtime::save_backend_config,
+            runtime::get_backend_config,
             kernel::kernel_execute,
             kernel::kernel_reset,
             artifact_file::read_artifact,
@@ -88,7 +93,12 @@ pub fn run() {
             preview_server::preview_url,
             large_file::probe_large_file,
             tools::detect_tools,
-            debug_log::log_debug
+            debug_log::log_debug,
+            wsl::get_available_backends,
+            wsl::check_wsl_health,
+            wsl::discover_opencode_url,
+            remote::probe_remote_host,
+            remote::check_remote_host
         ])
         .build(tauri::generate_context!())
         .expect("error while building AI4S Workbench")
@@ -97,7 +107,10 @@ pub fn run() {
             // (ExitRequested is not always delivered), so handle BOTH — otherwise
             // the OpenCode sidecar / kernel / Jupyter orphan on every quit. The
             // cleanup is idempotent, so running on both is safe.
-            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
                 runtime::kill_child(&app.state::<RuntimeState>());
                 kernel::kill_kernel(&app.state::<KernelState>());
                 jupyter::kill_jupyter(&app.state::<JupyterState>());
