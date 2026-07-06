@@ -343,6 +343,8 @@ fn spawn_kernel_ssh(app: &AppHandle, lang: &str, host: &str) -> Result<Kernel, S
                 return Err("no Rscript found on remote host".into());
             }
             let code_file = format!("{}/r_cell.R", remote_dir);
+            crate::remote::ssh_write_file(host, &code_file, b"")?;
+            let code_file_wsl = code_file.clone();
 
             let child = std::process::Command::new("ssh")
                 .args(ssh_opts)
