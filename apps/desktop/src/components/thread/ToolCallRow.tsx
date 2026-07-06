@@ -6,11 +6,11 @@ const STATUS: Record<
   ToolCallStatus,
   { label: string; icon: React.ReactNode; className: string }
 > = {
-  pending: { label: "Pending", icon: <Clock size={13} />, className: "text-muted" },
-  running: { label: "Running", icon: <Loader2 size={13} className="animate-spin" />, className: "text-accent" },
-  "waiting-approval": { label: "Waiting", icon: <ShieldQuestion size={14} />, className: "text-warn" },
-  success: { label: "Success", icon: <Check size={13} />, className: "text-ok" },
-  warning: { label: "Warning", icon: <AlertTriangle size={14} />, className: "text-warn" },
+  pending: { label: "Waiting...", icon: <Clock size={13} />, className: "text-muted" },
+  running: { label: "Running...", icon: <Loader2 size={13} className="animate-spin" />, className: "text-accent" },
+  "waiting-approval": { label: "Pending approval", icon: <ShieldQuestion size={14} />, className: "text-warn" },
+  success: { label: "Completed", icon: <Check size={13} />, className: "text-ok" },
+  warning: { label: "Completed with warnings", icon: <AlertTriangle size={14} />, className: "text-warn" },
   failed: { label: "Failed", icon: <X size={14} />, className: "text-error" },
 };
 

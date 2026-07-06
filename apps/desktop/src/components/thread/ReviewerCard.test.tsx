@@ -19,11 +19,11 @@ const block = {
 describe("ReviewerCard", () => {
   it("shows finding badges, check tags, and titles, expanded by default", () => {
     render(<ReviewerCard block={block} />);
-    expect(screen.getByText("Warning")).toBeInTheDocument();
+    expect(screen.getByText("Warn")).toBeInTheDocument();
     expect(screen.getByText("Duplicate PMID in plan")).toBeInTheDocument();
     expect(screen.getByText("same PMID for two papers")).toBeInTheDocument();
-    expect(screen.getByText("Citation audit")).toBeInTheDocument();
-    expect(screen.getByText("Figure consistency")).toBeInTheDocument();
+    expect(screen.getByText("citation")).toBeInTheDocument();
+    expect(screen.getByText("figure ↔ code")).toBeInTheDocument();
     expect(screen.getByText("· 2 findings")).toBeInTheDocument();
   });
 
