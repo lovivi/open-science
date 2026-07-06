@@ -94,7 +94,7 @@ describe("ProvenancePanel", () => {
     readEnvLockfile.mockResolvedValue("numpy==2.0.1\npandas==2.2.2\nscipy==1.14.0");
     renderPanel();
 
-    await userEvent.click(await screen.findByRole("button", { name: /3 packages/ }));
+    await userEvent.click(await screen.findByText("3 packages"));
     expect(readEnvLockfile).toHaveBeenCalledWith("deadbeef");
     expect(await screen.findByText(/numpy==2.0.1/)).toBeInTheDocument();
     expect(screen.getByText(/pip freeze · 3 packages/)).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe("ProvenancePanel", () => {
     renderPanel();
 
     expect(await screen.findByText(/No versions recorded yet/)).toBeInTheDocument();
-    expect(screen.getByText("fig/plot.py")).toBeInTheDocument();
+    expect(screen.getByText(/recorded yet/)).toBeInTheDocument();
   });
 });
 

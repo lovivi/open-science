@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, RefreshCw, X } from "lucide-react";
 import {
   hpcCancel,
@@ -22,6 +23,7 @@ import { cn } from "@/lib/cn";
  * This card is also where the user watches and cancels their queued jobs.
  */
 export function ClusterCard() {
+  const { t } = useTranslation();
   const [hosts, setHosts] = useState<string[]>([]);
   const [host, setHost] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -111,14 +113,14 @@ export function ClusterCard() {
   return (
     <section className="mt-5 rounded-card border border-border bg-surface shadow-card">
       <header className="border-b border-border px-5 py-3">
-        <h2 className="font-serif text-[15px] text-text">Cluster (HPC)</h2>
+        <h2 className="font-serif text-[15px] text-text">{t("settings.cluster.title")}</h2>
         <p className="mt-0.5 text-xs text-muted">
-          Run heavy jobs on your Slurm cluster over SSH — connect once, then just ask the agent.
+          {t("settings.cluster.description")}
         </p>
       </header>
       <div className="px-5 py-4">
         {!isTauri ? (
-          <p className="text-[13px] text-muted">Available in the desktop app.</p>
+          <p className="text-[13px] text-muted">{t("errors.desktopOnly")}</p>
         ) : !host ? (
           <>
             <div className="flex items-center gap-2">
@@ -129,8 +131,8 @@ export function ClusterCard() {
                 onKeyDown={(e) => e.key === "Enter" && void connect()}
                 placeholder={
                   hosts.length > 0
-                    ? `user@login.hpc.edu — or pick from your ~/.ssh/config (${hosts.length})`
-                    : "user@login.hpc.edu"
+                    ? t("settings.cluster.hostPlaceholderSshConfig", { count: hosts.length })
+                    : t("settings.cluster.hostPlaceholder")
                 }
                 className={inputCls("flex-1 font-mono")}
               />
@@ -145,14 +147,12 @@ export function ClusterCard() {
                 disabled={checking || !draft.trim()}
               >
                 {checking ? <Loader2 size={12} className="animate-spin" /> : null}
-                {checking ? "Checking…" : "Connect"}
+                {checking ? t("settings.cluster.status.checking") : t("settings.cluster.connect")}
               </button>
             </div>
             {connectError && <p className="mt-2 text-xs text-error">{connectError}</p>}
             <p className="mt-2.5 text-xs leading-relaxed text-muted">
-              Uses your own SSH keys — nothing is installed on the cluster. Once connected, the
-              agent can write and submit Slurm batch scripts for you and fetch the results back
-              into the workspace.
+              {t("settings.cluster.usageHint")}
             </p>
           </>
         ) : (
@@ -166,35 +166,35 @@ export function ClusterCard() {
               />
               <span className="font-mono font-medium text-text">{host}</span>
               <span className="truncate text-xs text-muted">
-                {check?.slurm ?? check?.message ?? "checking…"}
+                {check?.slurm ?? check?.message ?? t("settings.cluster.status.checking")}
               </span>
               <div className="flex-1" />
               <button
                 className="flex h-7 w-7 items-center justify-center rounded-input text-muted transition-colors hover:bg-surface-2 hover:text-text disabled:opacity-50"
                 onClick={() => void loadJobs(host)}
                 disabled={loadingJobs}
-                title="Refresh the job queue"
-                aria-label="Refresh the job queue"
+                title={t("settings.cluster.refreshQueue")}
+                aria-label={t("settings.cluster.refreshQueue")}
               >
                 <RefreshCw size={13} className={cn(loadingJobs && "animate-spin")} />
               </button>
               <button
                 className="text-xs text-muted transition-colors hover:text-error"
                 onClick={() => void remove()}
-                title="Disconnect this cluster"
+                title={t("settings.cluster.disconnectTitle")}
               >
-                Remove
+                {t("common.remove")}
               </button>
             </div>
 
             <div className="mt-3 overflow-hidden rounded-input border border-border">
               {jobs === null ? (
                 <p className="bg-surface px-3 py-2.5 text-[13px] text-muted">
-                  {loadingJobs ? "Reading the queue…" : "Queue unavailable."}
+                  {loadingJobs ? t("settings.cluster.readingQueue") : t("settings.cluster.queueUnavailable")}
                 </p>
               ) : jobs.length === 0 ? (
                 <p className="bg-surface px-3 py-2.5 text-[13px] text-muted">
-                  No jobs in the queue.
+                  {t("settings.cluster.noJobs")}
                 </p>
               ) : (
                 jobs.map((j, i) => (
@@ -224,8 +224,8 @@ export function ClusterCard() {
                     <button
                       className="flex h-6 w-6 items-center justify-center rounded-input text-muted transition-colors hover:bg-surface-2 hover:text-error"
                       onClick={() => void cancel(j.id)}
-                      title={`Cancel job ${j.id}`}
-                      aria-label={`Cancel job ${j.id}`}
+                      title={t("settings.cluster.cancelJob", { id: j.id })}
+                      aria-label={t("settings.cluster.cancelJob", { id: j.id })}
                     >
                       <X size={13} />
                     </button>
@@ -234,8 +234,7 @@ export function ClusterCard() {
               )}
             </div>
             <p className="mt-2.5 text-xs text-muted">
-              Ask the agent to run an analysis on the cluster — it submits batch scripts here and
-              pulls results back into the workspace.
+              {t("settings.cluster.usageHint")}
             </p>
           </>
         )}

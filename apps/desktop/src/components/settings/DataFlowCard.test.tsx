@@ -15,6 +15,6 @@ describe("DataFlowCard", () => {
 
   it("shows the unconfigured state without a workspace path", () => {
     render(<DataFlowCard model={null} workspace={null} />);
-    expect(screen.getByText("no model configured")).toBeInTheDocument();
+    expect(screen.getByText("Not set — pick a default model")).toBeInTheDocument();
   });
 });

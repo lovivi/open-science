@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown, CornerDownLeft, NotebookPen, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { NotebookCell, NotebookInspector as NotebookInspectorT } from "@ai4s/shared";
 import { CodeViewer } from "@/components/code-viewer/CodeViewer";
 import { formatExecResult, kernelExecute } from "@/lib/kernel";
@@ -16,6 +17,7 @@ export function NotebookInspector({
   onEvaluate?: (expr: string) => void;
 }) {
   const [cells, setCells] = useState<NotebookCell[]>(data.cells);
+  const { t } = useTranslation();
   const [expr, setExpr] = useState("");
   const [busy, setBusy] = useState(false);
   // Viewing position, restored when this notebook is reopened.
@@ -39,9 +41,9 @@ export function NotebookInspector({
       if (res) setOutput(formatExecResult(res));
       else if (onEvaluate) {
         onEvaluate(code);
-        setOutput("→ sent to the agent's kernel");
+        setOutput(t("notebook.sentToAgent"));
       } else {
-        setOutput("(local kernel available only in the desktop app)");
+        setOutput(t("notebook.desktopOnly"));
       }
     } catch (e) {
       setOutput(`kernel error: ${e instanceof Error ? e.message : String(e)}`);
@@ -61,9 +63,9 @@ export function NotebookInspector({
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-2 border-b border-border px-4 py-3">
         <NotebookPen size={15} className="text-muted" />
-        <span className="text-sm font-medium text-text">Notebook</span>
+        <span className="text-sm font-medium text-text">{t("notebook.inspectorTitle")}</span>
         <div className="flex-1" />
-        <button className="text-muted hover:text-text" aria-label="Close inspector" onClick={onClose}>
+        <button className="text-muted hover:text-text" aria-label={t("artifact.closeInspector")} onClick={onClose}>
           <X size={16} />
         </button>
       </header>
@@ -72,11 +74,11 @@ export function NotebookInspector({
         <span className="rounded-input bg-surface-2 px-2 py-1 text-sm font-medium text-text">
           {data.name}
         </span>
-        <span className="text-sm text-muted">Shared with the agent</span>
+        <span className="text-sm text-muted">{t("notebook.sharedWithAgent")}</span>
         <div className="flex-1" />
         {data.live && (
           <span className="flex items-center gap-1 text-sm text-ok">
-            <span className="h-1.5 w-1.5 rounded-full bg-ok" /> Live
+            <span className="h-1.5 w-1.5 rounded-full bg-ok" /> {t("notebook.live")}
             <ChevronDown size={14} />
           </span>
         )}
@@ -92,7 +94,7 @@ export function NotebookInspector({
             <CodeViewer code={cell.code} language={cell.language} startLine={1} />
             {cell.output && (
               <div className="mt-2">
-                <div className="mb-1 text-xs text-muted">&gt; output</div>
+                <div className="mb-1 text-xs text-muted">&gt; {t("notebook.output")}</div>
                 <pre className="whitespace-pre-wrap rounded-input border border-border bg-surface-2 p-3 font-mono text-[12.5px] text-text">
                   {cell.output}
                 </pre>
@@ -111,13 +113,13 @@ export function NotebookInspector({
             value={expr}
             onChange={(e) => setExpr(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Type an expression and press Enter"
+            placeholder={t("notebook.empty")}
             className="flex-1 bg-transparent font-mono text-[13px] text-text outline-none placeholder:text-muted"
-            aria-label="Notebook expression"
+            aria-label={t("notebook.expressionInput")}
           />
           <button
             className="text-muted hover:text-text disabled:opacity-30"
-            aria-label="Run expression"
+            aria-label={t("notebook.runExpression")}
             onClick={() => void evaluate()}
             disabled={!expr.trim() || busy}
           >

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, NotebookPen, Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { addTextToWorkspace, isTauri } from "@/lib/tauri";
 import { listNotebooks, type NotebookEntry } from "@/lib/artifactFile";
 import { emptyIpynb } from "@/lib/notebook-file";
@@ -15,6 +16,7 @@ import { toast } from "@/lib/toast";
  * first. A notebook's kernel always runs in the notebook's own folder.
  */
 export function NotebooksPage() {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<NotebookEntry[]>([]);
   /** Open notebook + the tree its path resolves in ("base" = listed here;
    *  "workspace" = just created in the active session folder). */
@@ -68,7 +70,7 @@ export function NotebooksPage() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl px-8 py-6">
         <div className="flex items-center gap-3">
-          <h1 className="font-serif text-xl text-text">Notebooks</h1>
+          <h1 className="font-serif text-xl text-text">{t("notebook.title")}</h1>
           <div className="flex-1" />
           <div className="relative" ref={menuRef}>
             <button
@@ -78,7 +80,7 @@ export function NotebooksPage() {
               aria-haspopup="menu"
               aria-expanded={menuOpen}
             >
-              <Plus size={13} /> New notebook <ChevronDown size={12} className="opacity-80" />
+              <Plus size={13} /> {t("notebook.newNotebook")} <ChevronDown size={12} className="opacity-80" />
             </button>
             {menuOpen && (
               <div
@@ -90,14 +92,14 @@ export function NotebooksPage() {
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-text hover:bg-surface-2"
                   onClick={() => void createNew("python")}
                 >
-                  <NotebookPen size={13} className="text-muted" /> Python notebook
+                  <NotebookPen size={13} className="text-muted" /> {t("notebook.python")} notebook
                 </button>
                 <button
                   role="menuitem"
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-text hover:bg-surface-2"
                   onClick={() => void createNew("r")}
                 >
-                  <NotebookPen size={13} className="text-muted" /> R notebook
+                  <NotebookPen size={13} className="text-muted" /> {t("notebook.r")} notebook
                 </button>
               </div>
             )}

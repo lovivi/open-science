@@ -18,7 +18,7 @@ describe("Composer attachments (desktop)", () => {
     await waitFor(() => expect(screen.getByText("data.csv")).toBeTruthy());
 
     // Chip is outside the textarea — typing text is independent of the file.
-    const input = screen.getByLabelText("Ask anything");
+    const input = screen.getByLabelText("Ask anything...");
     fireEvent.change(input, { target: { value: "analyze this" } });
     fireEvent.keyDown(input, { key: "Enter" });
 
@@ -40,7 +40,7 @@ describe("Composer attachments (desktop)", () => {
 
   it("turns an oversized paste into a workspace file chip, keeping the box clean", async () => {
     render(<Composer onSend={vi.fn()} />);
-    const input = screen.getByLabelText("Ask anything") as HTMLTextAreaElement;
+    const input = screen.getByLabelText("Ask anything...") as HTMLTextAreaElement;
 
     fireEvent.paste(input, {
       clipboardData: { getData: () => "x".repeat(3000) },

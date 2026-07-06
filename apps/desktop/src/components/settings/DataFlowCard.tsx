@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { HardDrive, Send } from "lucide-react";
 
 /**
@@ -6,18 +7,19 @@ import { HardDrive, Send } from "lucide-react";
  * architecture — when behavior changes, change this copy in the same commit.
  */
 export function DataFlowCard({ model, workspace }: { model: string | null; workspace: string | null }) {
+  const { t } = useTranslation();
   return (
     <section className="mt-5 rounded-card border border-border bg-surface shadow-card">
       <header className="border-b border-border px-5 py-3">
-        <h2 className="font-serif text-[15px] text-text">Privacy &amp; data flow</h2>
+        <h2 className="font-serif text-[15px] text-text">{t("settings.privacy.title")}</h2>
         <p className="mt-0.5 text-xs text-muted">
-          What stays on this machine, and exactly what leaves it.
+          {t("settings.privacy.description")}
         </p>
       </header>
       <div className="grid gap-5 px-5 py-4 sm:grid-cols-2">
         <div>
           <div className="flex items-center gap-1.5 text-[13px] font-medium text-text">
-            <HardDrive size={14} className="text-ok" /> Stays on this machine
+            <HardDrive size={14} className="text-ok" /> {t("settings.privacy.staysLocal")}
           </div>
           <ul className="mt-2 list-disc space-y-1.5 pl-4 text-[13px] leading-relaxed text-muted">
             <li>
@@ -31,9 +33,9 @@ export function DataFlowCard({ model, workspace }: { model: string | null; works
         </div>
         <div>
           <div className="flex items-center gap-1.5 text-[13px] font-medium text-text">
-            <Send size={14} className="text-warn" /> Sent to your model provider
+            <Send size={14} className="text-warn" /> {t("settings.privacy.sentToProvider")}
             <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-muted">
-              {model ?? "no model configured"}
+              {model ?? t("settings.model.pickDefault")}
             </span>
           </div>
           <ul className="mt-2 list-disc space-y-1.5 pl-4 text-[13px] leading-relaxed text-muted">

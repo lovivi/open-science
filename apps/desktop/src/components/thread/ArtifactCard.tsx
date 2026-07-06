@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   Box,
   FileBarChart,
@@ -29,6 +30,7 @@ export function ArtifactCard({
   block: ArtifactBlock;
   onOpen?: (a: ArtifactBlock) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className={cn(
@@ -47,7 +49,7 @@ export function ArtifactCard({
       <div className="flex-1" />
       {onOpen && (
         <span className="flex shrink-0 items-center gap-1 rounded-input px-2 py-1 text-xs text-link">
-          <SquareArrowOutUpRight size={13} /> Open
+          <SquareArrowOutUpRight size={13} /> {t("artifact.open")}
         </span>
       )}
     </div>

@@ -1,5 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 
+// Initialize i18n so components render translated strings in tests.
+import "@/lib/i18n";
+
 // DOM stubs — only in a browser-like (jsdom) environment. The node-env tests
 // (e.g. the OpenCode integration test) skip these.
 if (typeof window !== "undefined") {

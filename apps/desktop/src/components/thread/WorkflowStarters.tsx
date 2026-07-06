@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { ChevronRight, FileSearch, FlaskConical, Globe2, LineChart } from "lucide-react";
 import { installExample, isTauri } from "@/lib/tauri";
 import { toast } from "@/lib/toast";
@@ -39,7 +40,7 @@ export const WORKFLOW_STARTERS: WorkflowStarter[] = [
   {
     id: "audit",
     icon: <FileSearch size={17} strokeWidth={1.75} />,
-    title: "Audit a report for traceability",
+    title: "Audit a report",
     description: "Check citations, unsourced numbers, and figure-versus-code consistency.",
     prompt:
       "Use the traceability-review skill to audit the report or manuscript in my workspace: resolve every " +
@@ -71,18 +72,27 @@ export const WORKFLOW_STARTERS: WorkflowStarter[] = [
  * first; the starters below are an optional on-ramp, not a dashboard.
  */
 export function WorkflowStarters({ onPick }: { onPick: (prompt: string) => void }) {
+  const { t } = useTranslation();
+
+  const STARTER_LABELS: Record<string, { title: string; description: string }> = {
+    demo: { title: t("thread.workflowStarters.demo"), description: t("thread.workflowStarters.demoDesc") },
+    analyze: { title: t("thread.workflowStarters.analyzeData"), description: t("thread.workflowStarters.analyzeDataDesc") },
+    audit: { title: t("thread.workflowStarters.audit"), description: t("thread.workflowStarters.auditDesc") },
+    "example-climate": { title: t("thread.workflowStarters.explore"), description: t("thread.workflowStarters.exploreDesc") },
+  };
+
   return (
     <div className="flex min-h-[62vh] flex-col items-center justify-center">
       <div className="w-full max-w-[500px]">
         <div className="text-center">
           <div className="text-[10.5px] font-medium uppercase tracking-[0.2em] text-muted">
-            New session
+            {t("thread.welcome.newSession")}
           </div>
           <h2 className="mt-2.5 font-serif text-[26px] leading-tight text-text">
-            What should we look into?
+            {t("thread.welcome.question")}
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-muted">
-            Describe your analysis below — or start from one of these.
+            {t("thread.welcome.hint")}
           </p>
         </div>
 
@@ -109,8 +119,12 @@ export function WorkflowStarters({ onPick }: { onPick: (prompt: string) => void 
                 {s.icon}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[13.5px] font-medium text-text">{s.title}</span>
-                <span className="mt-0.5 block text-xs leading-snug text-muted">{s.description}</span>
+                <span className="block text-[13.5px] font-medium text-text">
+                  {(STARTER_LABELS[s.id] ?? s).title}
+                </span>
+                <span className="mt-0.5 block text-xs leading-snug text-muted">
+                  {(STARTER_LABELS[s.id] ?? s).description}
+                </span>
               </span>
               <ChevronRight
                 size={16}

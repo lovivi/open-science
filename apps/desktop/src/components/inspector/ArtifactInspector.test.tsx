@@ -23,7 +23,7 @@ describe("ArtifactInspector", () => {
     render(<ArtifactInspector data={data} onClose={() => {}} />);
     expect(screen.getByText("Download script")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Execution Log" }));
+    await userEvent.click(screen.getByRole("button", { name: "Logs" }));
     expect(screen.getByText("log line one")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Review/ }));

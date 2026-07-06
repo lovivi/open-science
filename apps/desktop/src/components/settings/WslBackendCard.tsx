@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, Loader2 } from "lucide-react";
 import {
   checkWslHealth,
@@ -24,6 +25,7 @@ import { cn } from "@/lib/cn";
  * option that expands into host input and a test-connection probe.
  */
 export function WslBackendCard() {
+  const { t } = useTranslation();
   const [backends, setBackends] = useState<BackendConfig[]>([]);
   const [currentConfig, setCurrentConfig] = useState<BackendConfig | null>(null);
   const [selected, setSelected] = useState("native");
@@ -157,13 +159,13 @@ export function WslBackendCard() {
     return (
       <section className="mt-5 rounded-card border border-border bg-surface shadow-card">
         <header className="border-b border-border px-5 py-3">
-          <h2 className="font-serif text-[15px] text-text">Execution Backend</h2>
+          <h2 className="font-serif text-[15px] text-text">{t("settings.executionBackend.title")}</h2>
           <p className="mt-0.5 text-xs text-muted">
-            Choose where the agent and its tools (Python, R, shell) run.
+            {t("settings.executionBackend.description")}
           </p>
         </header>
         <div className="px-5 py-4">
-          <p className="text-[13px] text-muted">Available in the desktop app on Windows.</p>
+          <p className="text-[13px] text-muted">{t("errors.desktopOnly")}</p>
         </div>
       </section>
     );
@@ -172,10 +174,9 @@ export function WslBackendCard() {
   return (
     <section className="mt-5 rounded-card border border-border bg-surface shadow-card">
       <header className="border-b border-border px-5 py-3">
-        <h2 className="font-serif text-[15px] text-text">Execution Backend</h2>
+        <h2 className="font-serif text-[15px] text-text">{t("settings.executionBackend.title")}</h2>
         <p className="mt-0.5 text-xs text-muted">
-          Choose where the agent and its tools run. Supports Windows (Native), WSL and
-          remote SSH hosts.
+          {t("settings.executionBackend.descriptionDetailed")}
         </p>
       </header>
       <div className="px-5 py-4">
@@ -187,13 +188,13 @@ export function WslBackendCard() {
             disabled={saving}
             className={cn(inputCls("w-full appearance-none pr-9"), "cursor-pointer")}
           >
-            <option value="native">Windows (Native)</option>
+            <option value="native">{t("settings.executionBackend.native")}</option>
             {wslBackends.map((b) => (
               <option key={b.distro} value={`wsl:${b.distro}`}>
-                WSL ({b.distro})
+                {t("settings.executionBackend.wsl", { distro: b.distro })}
               </option>
             ))}
-            <option value="ssh">SSH (Connect to a remote server)</option>
+            <option value="ssh">{t("settings.executionBackend.ssh")}</option>
           </select>
           <ChevronDown
             size={14}
@@ -217,11 +218,11 @@ export function WslBackendCard() {
             <span className="font-medium text-text">WSL: {selected.split(":")[1]}</span>
             <span className="truncate text-xs text-muted">
               {healthStatus === "checking"
-                ? "Checking connectivity…"
+                ? t("settings.executionBackend.checkingConnectivity")
                 : healthStatus === "healthy"
-                  ? "Connected"
+                  ? t("settings.executionBackend.connected")
                   : healthStatus === "error"
-                    ? "Not reachable"
+                    ? t("settings.executionBackend.notReachable")
                     : ""}
             </span>
           </div>
@@ -233,7 +234,7 @@ export function WslBackendCard() {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="user@hostname"
+                placeholder={t("settings.executionBackend.sshHostPlaceholder")}
                 value={sshHost}
                 onChange={(e) => setSshHost(e.target.value)}
                 className={cn(inputCls("flex-1 font-mono"), "font-mono")}
@@ -244,7 +245,7 @@ export function WslBackendCard() {
                 disabled={sshProbing || !sshHost.trim()}
               >
                 {sshProbing ? <Loader2 size={12} className="animate-spin" /> : null}
-                {sshProbing ? "Probing…" : "Test connection"}
+                {sshProbing ? t("settings.executionBackend.probing") : t("settings.executionBackend.testConnection")}
               </button>
             </div>
 
@@ -258,8 +259,8 @@ export function WslBackendCard() {
                       sshStatus.reachable ? "bg-ok" : "bg-error",
                     )}
                   />
-                  <span className="font-medium text-text">Reachable:</span>
-                  <span className="text-muted">{sshStatus.reachable ? "Yes" : "No"}</span>
+                  <span className="font-medium text-text">{t("settings.executionBackend.reachable")}:</span>
+                  <span className="text-muted">{sshStatus.reachable ? t("settings.executionBackend.yes") : t("settings.executionBackend.no")}</span>
                 </div>
                 {sshStatus.reachable && (
                   <>
@@ -271,7 +272,7 @@ export function WslBackendCard() {
                         )}
                       />
                       <span className="font-medium text-text">Python 3:</span>
-                      <span className="text-muted">{sshStatus.has_python3 ? "Available" : "Not found"}</span>
+                      <span className="text-muted">{sshStatus.has_python3 ? t("settings.executionBackend.available") : t("settings.executionBackend.notFound")}</span>
                     </div>
                     <div className="mt-1.5 flex items-center gap-2">
                       <span
@@ -281,7 +282,7 @@ export function WslBackendCard() {
                         )}
                       />
                       <span className="font-medium text-text">R:</span>
-                      <span className="text-muted">{sshStatus.has_rscript ? "Available" : "Not found"}</span>
+                      <span className="text-muted">{sshStatus.has_rscript ? t("settings.executionBackend.available") : t("settings.executionBackend.notFound")}</span>
                     </div>
                   </>
                 )}
@@ -302,10 +303,10 @@ export function WslBackendCard() {
               disabled={saving}
             >
               {saving ? <Loader2 size={12} className="animate-spin" /> : null}
-              {saving ? "Restarting…" : "Save & Restart runtime"}
+              {saving ? t("settings.executionBackend.restarting") : t("settings.executionBackend.saveRestartRuntime")}
             </button>
             <p className="text-xs text-muted">
-              The agent runtime will restart with the new backend.
+              {t("settings.executionBackend.restartHint")}
             </p>
           </div>
         )}

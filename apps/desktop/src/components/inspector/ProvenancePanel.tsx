@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, MessageSquare, Package, RotateCcw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import type { ProvenanceRecord } from "@ai4s/shared";
 import { listProvenance, readEnvLockfile } from "@/lib/provenance";
 import { useUiStore } from "@/lib/store";
@@ -46,6 +47,7 @@ function longestBacktickRun(text: string): number {
  * conversation. Data comes from `.openscience/provenance.jsonl` (P0-3).
  */
 export function ProvenancePanel({ path, language }: { path: string; language?: string }) {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<ProvenanceRecord[] | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   // The package lockfile currently shown, keyed by its content hash.
@@ -61,7 +63,7 @@ export function ProvenancePanel({ path, language }: { path: string; language?: s
     }
     setLockfile({ hash, text: null });
     void readEnvLockfile(hash).then((text) =>
-      setLockfile((cur) => (cur?.hash === hash ? { hash, text: text ?? "(lockfile unavailable)" } : cur)),
+      setLockfile((cur) => (cur?.hash === hash ? { hash, text: text ?? t("artifact.lockfileUnavailable") } : cur)),
     );
   };
 
@@ -88,7 +90,7 @@ export function ProvenancePanel({ path, language }: { path: string; language?: s
   if (records === null) {
     return (
       <div className="flex items-center gap-2 p-4 text-sm text-muted">
-        <Loader2 size={15} className="animate-spin" /> Loading history…
+        <Loader2 size={15} className="animate-spin" /> {t("artifact.loadingHistory")}
       </div>
     );
   }
@@ -96,9 +98,7 @@ export function ProvenancePanel({ path, language }: { path: string; language?: s
   if (records.length === 0) {
     return (
       <div className="p-4 text-sm text-muted">
-        No versions recorded yet. Each time the agent writes{" "}
-        <span className="font-mono text-text">{path}</span>, a version is added here with the
-        code, model, and conversation that produced it.
+        {t("artifact.noVersions", { path })}
       </div>
     );
   }
@@ -135,7 +135,7 @@ export function ProvenancePanel({ path, language }: { path: string; language?: s
                   {r.env && (
                     <span
                       className="rounded bg-surface-2 px-1.5 py-0.5 font-mono"
-                      title="Environment this version was produced in"
+                      title={t("artifact.environment")}
                     >
                       {[r.env.python && `py ${r.env.python}`, r.env.platform, `app ${r.env.app}`]
                         .filter(Boolean)
@@ -149,10 +149,10 @@ export function ProvenancePanel({ path, language }: { path: string; language?: s
                         lockfile?.hash === r.env.packages.hash && "bg-surface-2 text-text",
                       )}
                       onClick={() => toggleLockfile(r.env!.packages!.hash)}
-                      title="View the captured pip freeze lockfile for this version"
+                      title={t("artifact.packages", { count: r.env.packages.count })}
                       aria-pressed={lockfile?.hash === r.env.packages.hash}
                     >
-                      <Package size={11} /> {r.env.packages.count} packages
+                      <Package size={11} /> {t("artifact.packages", { count: r.env.packages.count })}
                     </button>
                   )}
                   {r.log && <span className="truncate">{r.log}</span>}
@@ -161,29 +161,29 @@ export function ProvenancePanel({ path, language }: { path: string; language?: s
                     <button
                       className="flex items-center gap-1 text-link hover:underline"
                       onClick={() => reproduce(r)}
-                      title="Draft a prompt that re-runs this version's code and compares the result"
+                      title={t("artifact.reproduce")}
                     >
-                      <RotateCcw size={12} /> Reproduce
+                      <RotateCcw size={12} /> {t("artifact.reproduce")}
                     </button>
                   )}
                   {r.sessionId && (
                     <button
                       className="flex items-center gap-1 text-link hover:underline"
                       onClick={() => navigate(`/live/${r.sessionId}`)}
-                      title="Open the conversation this version came from"
+                      title={t("artifact.openConversation")}
                     >
-                      <MessageSquare size={12} /> Open conversation
+                      <MessageSquare size={12} /> {t("artifact.openConversation")}
                     </button>
                   )}
                 </div>
                 {r.env?.packages && lockfile?.hash === r.env.packages.hash && (
                   <div className="rounded-input border border-border bg-surface-2">
                     <div className="border-b border-border px-2.5 py-1 text-[11px] text-muted">
-                      pip freeze · {r.env.packages.count} packages
+                      {t("artifact.pipFreeze", { count: r.env.packages.count })}
                     </div>
                     {lockfile.text === null ? (
                       <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted">
-                        <Loader2 size={12} className="animate-spin" /> Loading…
+                        <Loader2 size={12} className="animate-spin" /> {t("common.loading")}
                       </div>
                     ) : (
                       <pre className="max-h-48 overflow-auto px-2.5 py-2 font-mono text-[11px] leading-relaxed text-text">
@@ -196,7 +196,7 @@ export function ProvenancePanel({ path, language }: { path: string; language?: s
                   <CodeViewer code={r.content} language={language} />
                 ) : (
                   <div className={cn("text-xs text-muted")}>
-                    Content not captured for this version (binary or produced by running code).
+                    {t("artifact.contentNotCaptured")}
                   </div>
                 )}
               </div>

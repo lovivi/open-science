@@ -7,7 +7,7 @@ describe("Composer", () => {
   it("appends a prepared draft below text the user was already typing", () => {
     useUiStore.setState({ composerDraft: null });
     render(<Composer onSend={vi.fn()} />);
-    const input = screen.getByLabelText<HTMLTextAreaElement>("Ask anything");
+    const input = screen.getByLabelText<HTMLTextAreaElement>("Ask anything...");
     fireEvent.change(input, { target: { value: "half-written thought" } });
 
     act(() => useUiStore.getState().setComposerDraft("Reproduce `fig/plot.py`…"));
@@ -23,7 +23,7 @@ describe("Composer", () => {
   it("sends on Enter but never during IME composition", () => {
     const onSend = vi.fn();
     render(<Composer onSend={onSend} />);
-    const input = screen.getByLabelText("Ask anything");
+    const input = screen.getByLabelText("Ask anything...");
     fireEvent.change(input, { target: { value: "ni hao" } });
 
     // Enter while composing (picking a pinyin candidate) must not send.
@@ -42,7 +42,7 @@ describe("Composer", () => {
   it("does not send when empty or disabled", () => {
     const onSend = vi.fn();
     const { rerender } = render(<Composer onSend={onSend} />);
-    const input = screen.getByLabelText("Ask anything");
+    const input = screen.getByLabelText("Ask anything...");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
 

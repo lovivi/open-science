@@ -4,11 +4,11 @@ import type { ToolCallStatus } from "@ai4s/shared";
 import { ToolCallRow } from "./ToolCallRow";
 
 const STATUSES: [ToolCallStatus, string][] = [
-  ["pending", "Pending"],
-  ["running", "Running"],
-  ["waiting-approval", "Waiting"],
-  ["success", "Success"],
-  ["warning", "Warning"],
+  ["pending", "Waiting..."],
+  ["running", "Running..."],
+  ["waiting-approval", "Pending approval"],
+  ["success", "Completed"],
+  ["warning", "Completed with warnings"],
   ["failed", "Failed"],
 ];
 

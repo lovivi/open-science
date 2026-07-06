@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Bot, Boxes, Check, Package, Puzzle, X } from "lucide-react";
 import { useRuntimeStore } from "@/lib/runtime";
 import { cn } from "@/lib/cn";
@@ -10,6 +11,7 @@ import { cn } from "@/lib/cn";
  */
 export function SkillsPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { skills, agents, tools, status, loadCatalog, detectTools, installSkill } = useRuntimeStore();
   const connected = status === "ready";
   const [text, setText] = useState("");
@@ -34,14 +36,14 @@ export function SkillsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl px-8 py-8">
-        <h1 className="font-serif text-xl text-text">Skills &amp; Agents</h1>
+        <h1 className="font-serif text-xl text-text">{t("sidebar.skills")}</h1>
         <p className="mt-1 text-sm text-muted">
           Loaded live from the OpenCode runtime — the bundled ai4s-skills pack plus anything under{" "}
           <span className="font-mono">.opencode/skills/</span> in your workspace.
         </p>
 
         {/* Install a skill (#1) */}
-        <Section title="Install a skill" icon={<Boxes size={15} />}>
+        <Section title={t("skills.installSkill")} icon={<Boxes size={15} />}>
           <div className="p-4">
             <textarea
               value={text}
@@ -56,26 +58,26 @@ export function SkillsPage() {
                 disabled={!connected || !text.trim() || installing}
                 className="rounded-input bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-40"
               >
-                {installing ? "Starting…" : "Install with agent"}
+                {installing ? t("skills.starting") : t("skills.installWithAgent")}
               </button>
               <span className="text-xs text-muted">
                 {connected
-                  ? "Opens a session and asks the agent to add it (customize-opencode)."
-                  : "Connect the runtime first."}
+                  ? t("skills.connectHint")
+                  : t("skills.connectRuntime")}
               </span>
             </div>
           </div>
         </Section>
 
         {/* Environment (#2) */}
-        <Section title="Scientific environment" icon={<Package size={15} />}>
-          {tools.length === 0 && <Empty>Environment detection runs in the desktop app.</Empty>}
-          {tools.map((t) => (
-            <div key={t.name} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              {t.found ? <Check size={15} className="text-ok" /> : <X size={15} className="text-muted" />}
-              <span className="w-24 text-text">{t.name}</span>
+        <Section title={t("skills.scientificEnv")} icon={<Package size={15} />}>
+          {tools.length === 0 && <Empty>{t("skills.envDetection")}</Empty>}
+          {tools.map((tool) => (
+            <div key={tool.name} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+              {tool.found ? <Check size={15} className="text-ok" /> : <X size={15} className="text-muted" />}
+              <span className="w-24 text-text">{tool.name}</span>
               <span className="flex-1 truncate font-mono text-xs text-muted">
-                {t.found ? t.version ?? "found" : "not found"}
+                {tool.found ? tool.version ?? t("skills.found") : t("skills.notFound")}
               </span>
             </div>
           ))}
@@ -88,13 +90,13 @@ export function SkillsPage() {
         {connected ? (
           <>
             <Section title={`Agents (${agents.length})`} icon={<Bot size={15} />}>
-              {agents.length === 0 && <Empty>No agents reported.</Empty>}
+              {agents.length === 0 && <Empty>{t("skills.noAgents")}</Empty>}
               {agents.map((a) => (
                 <RowItem key={a.name} name={a.name} desc={a.description} tag={a.mode} />
               ))}
             </Section>
             <Section title={`Skills (${skills.length})`} icon={<Puzzle size={15} />}>
-              {skills.length === 0 && <Empty>No skills loaded yet.</Empty>}
+              {skills.length === 0 && <Empty>{t("skills.noSkills")}</Empty>}
               {skills.map((s) => (
                 <RowItem key={s.name} name={s.name} desc={s.description} tag={sourceOf(s.location)} />
               ))}
@@ -102,7 +104,7 @@ export function SkillsPage() {
           </>
         ) : (
           <div className="mt-6 rounded-card border border-border bg-surface p-5 text-sm text-muted">
-            Connect the runtime to list the skills and agents it has loaded.
+            {t("skills.runtimeHint")}
           </div>
         )}
       </div>
