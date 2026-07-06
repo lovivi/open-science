@@ -187,7 +187,8 @@ pub fn resolve_artifact(app: AppHandle, path: String) -> Result<Option<String>, 
     // SSH mode: resolve on remote host
     #[cfg(windows)]
     if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
-        let remote_ws = crate::runtime::remote_workspace_path(&host).unwrap_or_default();
+        is_safe_relative(&path)?;
+        let remote_ws = crate::runtime::remote_workspace_path(&host)?;
         return Ok(resolve_artifact_ssh(&host, &remote_ws, &path));
     }
 
@@ -200,6 +201,7 @@ pub fn read_artifact(app: AppHandle, path: String, root: Option<String>) -> Resu
     // SSH mode: read via remote SSH
     #[cfg(windows)]
     if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
+        is_safe_relative(&path)?;
         return read_artifact_ssh(&app, &host, &path);
     }
 
@@ -363,7 +365,8 @@ pub fn list_dir(app: AppHandle, rel: String, root: Option<String>) -> Result<Vec
     // SSH mode: list remote directory over SSH
     #[cfg(windows)]
     if let Some(host) = crate::runtime::get_remote_host_if_ssh(&app) {
-        let remote_ws = crate::runtime::remote_workspace_path(&host).unwrap_or_default();
+        is_safe_relative(&rel)?;
+        let remote_ws = crate::runtime::remote_workspace_path(&host)?;
         return list_dir_ssh(&host, &remote_ws, &rel);
     }
 
@@ -597,6 +600,18 @@ fn base64_encode(input: &[u8]) -> String {
 // on non-Windows platforms (where SSH remote backend is not supported).
 
 /// SSH variant of [`read_artifact`]: reads a remote file through SSH.
+
+/// Reject path components that could escape the workspace.
+fn is_safe_relative(p: &str) -> Result<(), String> {
+    let rel = std::path::Path::new(p);
+    if rel.is_absolute()
+        || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err("path must be a plain workspace-relative path".into());
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn read_artifact_ssh(app: &AppHandle, host: &str, path: &str) -> Result<ArtifactFile, String> {
     let remote_ws = crate::runtime::remote_workspace_path(host)?;
