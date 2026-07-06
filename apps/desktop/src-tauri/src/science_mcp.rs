@@ -30,6 +30,7 @@ fn python_bin(app: &AppHandle) -> Result<PathBuf, String> {
 /// frontend derives launch commands (`<python> -m <module> …`) from this.
 ///
 /// WSL mode: returns `"python3"` (resolved via PATH inside the WSL distro).
+/// SSH mode: returns `"python3"` (resolved via remote SSH PATH).
 #[tauri::command]
 pub fn science_mcp_python(app: AppHandle) -> Result<Option<String>, String> {
     // WSL mode: pip packages are installed into the WSL system Python, so the
@@ -41,6 +42,16 @@ pub fn science_mcp_python(app: AppHandle) -> Result<Option<String>, String> {
             if let Some(ref distro) = config.distro {
                 return Ok(
                     crate::wsl::wsl_check_tool(distro, "python3").then(|| "python3".to_string())
+                );
+            }
+        }
+        // SSH mode: check for python3 on the remote host
+        if config.kind == "ssh" {
+            if let Some(ref host) = config.host {
+                return Ok(
+                    crate::remote::ssh_exec(host, "which python3 2>/dev/null")
+                        .is_ok()
+                        .then(|| "python3".to_string())
                 );
             }
         }
@@ -68,7 +79,17 @@ pub async fn setup_science_mcp(app: AppHandle, package: String) -> Result<String
     #[cfg(windows)]
     {
         let config = crate::runtime::load_backend_config(&app);
-        if config.kind == "wsl" {
+        if config.kind == "ssh" {
+            if let Some(ref host) = config.host {
+                if crate::remote::ssh_exec(host, "which pip3 2>/dev/null").is_err() {
+                    return Err(
+                        "pip3 is not available on the remote host".into(),
+                    );
+                }
+                crate::remote::ssh_exec(host, &format!("pip3 install {}", package))?;
+                return Ok("python3".to_string());
+            }
+        } else if config.kind == "wsl" {
             if let Some(ref distro) = config.distro {
                 if !crate::wsl::wsl_check_tool(distro, "pip3") {
                     return Err(

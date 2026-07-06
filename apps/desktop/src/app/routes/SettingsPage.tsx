@@ -41,6 +41,7 @@ import { WslBackendCard } from "@/components/settings/WslBackendCard";
 import { SCIENCE_CONNECTORS, connectorConfig } from "@/lib/scienceConnectors";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/cn";
+import i18n from "@/lib/i18n";
 
 /**
  * Settings. ONE configuration surface: everything talks to the bundled
@@ -845,6 +846,26 @@ export function SettingsPage() {
                 )}
               >
                 {t}
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        {/* ---- Language ---- */}
+        <Card title="Language / 语言">
+          <div className="inline-flex rounded-input border border-border bg-surface-2 p-0.5">
+            {(["en", "zh"] as const).map((lng) => (
+              <button
+                key={lng}
+                onClick={() => i18n.changeLanguage(lng)}
+                className={cn(
+                  "rounded-[5px] px-4 py-1.5 text-[13px] transition-colors",
+                  i18n.language.startsWith(lng)
+                    ? "bg-surface text-text shadow-card"
+                    : "text-muted hover:text-text",
+                )}
+              >
+                {lng === "en" ? "English" : "中文"}
               </button>
             ))}
           </div>
